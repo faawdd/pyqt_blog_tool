@@ -10,6 +10,7 @@ from PyQt6.QtGui import (
     QColor,
     QFont,
     QIcon,
+    QPalette,
     QPainter,
     QResizeEvent,
     QSyntaxHighlighter,
@@ -62,9 +63,10 @@ class MarkdownHighlighter(QSyntaxHighlighter):
     _STATE_CODE_FENCE = 2
     _STATE_MATH_BLOCK = 3
 
-    def __init__(self, document) -> None:
+    def __init__(self, document, theme: str = "light") -> None:
         super().__init__(document)
         self._single_rules: list[tuple[re.Pattern, QTextCharFormat]] = []
+        self.theme = theme
         self._setup_rules()
 
     @staticmethod
@@ -86,39 +88,100 @@ class MarkdownHighlighter(QSyntaxHighlighter):
 
     def _setup_rules(self) -> None:
         f = self._fmt
-        rules: list[tuple[re.Pattern, QTextCharFormat]] = [
-            # 标题 # 到 ######
-            (re.compile(r'^#{1,6}(?!#) .+'), f('#1d4ed8', bold=True)),
-            # 加粗 **text** / __text__
-            (re.compile(r'\*\*[^*\n]+\*\*'), f('#7c3aed', bold=True)),
-            (re.compile(r'__[^_\n]+__'), f('#7c3aed', bold=True)),
-            # 斜体 *text* / _text_
-            (re.compile(r'(?<!\*)\*(?!\*)[^*\n]+(?<!\*)\*(?!\*)'), f('#0891b2', italic=True)),
-            (re.compile(r'(?<!_)_(?!_)[^_\n]+(?<!_)_(?!_)'), f('#0891b2', italic=True)),
-            # 行内代码 `code`
-            (re.compile(r'`[^`\n]+`'), f('#059669', bg='#f0fdf4')),
-            # 行内公式 $...$
-            (re.compile(r'\$[^$\n]+\$'), f('#b45309', bg='#fffbeb')),
-            # 引用块 > ...
-            (re.compile(r'^>.*'), f('#78716c', italic=True)),
-            # 图片 ![alt](url) 先于链接处理
-            (re.compile(r'!\[[^\]]*\]\([^)]+\)'), f('#0d9488')),
-            # 链接 [text](url)
-            (re.compile(r'\[[^\]]+\]\([^)]+\)'), f('#0369a1')),
-            # 角标/脚注 [^1] 彩色高亮
-            (re.compile(r'\[\^[0-9a-zA-Z]+\]'), f('#e11d48', bold=True, bg='#fdf2f8')),
-            # 任务列表 - [ ] / - [x]
-            (re.compile(r'^[\s]*[-*]\s+\[[ xX]\]'), f('#d97706', bold=True)),
-            # 无序列表标记 - / *
-            (re.compile(r'^[\s]*[-*]\s'), f('#6366f1')),
-            # 有序列表标记 1. 2.
-            (re.compile(r'^[\s]*\d+\.\s'), f('#6366f1')),
-            # 表格分隔符
-            (re.compile(r'\|'), f('#64748b')),
-            # 分隔线 ---
-            (re.compile(r'^-{3,}\s*$'), f('#94a3b8')),
-        ]
+        
+        if self.theme == "dark":
+            # 暗色主题颜色
+            rules: list[tuple[re.Pattern, QTextCharFormat]] = [
+                # 标题 # 到 ######
+                (re.compile(r'^#{1,6}(?!#) .+'), f('#60a5fa', bold=True)),
+                # 加粗 **text** / __text__
+                (re.compile(r'\*\*[^*\n]+\*\*'), f('#c084fc', bold=True)),
+                (re.compile(r'__[^_\n]+__'), f('#c084fc', bold=True)),
+                # 斜体 *text* / _text_
+                (re.compile(r'(?<!\*)\*(?!\*)[^*\n]+(?<!\*)\*(?!\*)'), f('#22d3ee', italic=True)),
+                (re.compile(r'(?<!_)_(?!_)[^_\n]+(?<!_)_(?!_)'), f('#22d3ee', italic=True)),
+                # 行内代码 `code`
+                (re.compile(r'`[^`\n]+`'), f('#86efac', bg='#1e3a1f')),
+                # 行内公式 $...$
+                (re.compile(r'\$[^$\n]+\$'), f('#fbbf24', bg='#2d2413')),
+                # 引用块 > ...
+                (re.compile(r'^>.*'), f('#a0a0a0', italic=True)),
+                # 图片 ![alt](url)
+                (re.compile(r'!\[[^\]]*\]\([^)]+\)'), f('#2dd4bf')),
+                # 链接 [text](url)
+                (re.compile(r'\[[^\]]+\]\([^)]+\)'), f('#38bdf8')),
+                # 脚注 [^1]
+                (re.compile(r'\[\^[0-9a-zA-Z]+\]'), f('#f43f5e', bold=True, bg='#3f1621')),
+                # 任务列表
+                (re.compile(r'^[\s]*[-*]\s+\[[ xX]\]'), f('#f59e0b', bold=True)),
+                # 无序列表标记
+                (re.compile(r'^[\s]*[-*]\s'), f('#818cf8')),
+                # 有序列表标记
+                (re.compile(r'^[\s]*\d+\.\s'), f('#818cf8')),
+                # 表格分隔符
+                (re.compile(r'\|'), f('#64748b')),
+                # 分隔线
+                (re.compile(r'^-{3,}\s*$'), f('#78716c')),
+            ]
+        else:
+            # 亮色主题颜色
+            rules: list[tuple[re.Pattern, QTextCharFormat]] = [
+                # 标题 # 到 ######
+                (re.compile(r'^#{1,6}(?!#) .+'), f('#1d4ed8', bold=True)),
+                # 加粗 **text** / __text__
+                (re.compile(r'\*\*[^*\n]+\*\*'), f('#7c3aed', bold=True)),
+                (re.compile(r'__[^_\n]+__'), f('#7c3aed', bold=True)),
+                # 斜体 *text* / _text_
+                (re.compile(r'(?<!\*)\*(?!\*)[^*\n]+(?<!\*)\*(?!\*)'), f('#0891b2', italic=True)),
+                (re.compile(r'(?<!_)_(?!_)[^_\n]+(?<!_)_(?!_)'), f('#0891b2', italic=True)),
+                # 行内代码 `code`
+                (re.compile(r'`[^`\n]+`'), f('#059669', bg='#f0fdf4')),
+                # 行内公式 $...$
+                (re.compile(r'\$[^$\n]+\$'), f('#b45309', bg='#fffbeb')),
+                # 引用块 > ...
+                (re.compile(r'^>.*'), f('#78716c', italic=True)),
+                # 图片 ![alt](url)
+                (re.compile(r'!\[[^\]]*\]\([^)]+\)'), f('#0d9488')),
+                # 链接 [text](url)
+                (re.compile(r'\[[^\]]+\]\([^)]+\)'), f('#0369a1')),
+                # 脚注 [^1]
+                (re.compile(r'\[\^[0-9a-zA-Z]+\]'), f('#e11d48', bold=True, bg='#fdf2f8')),
+                # 任务列表
+                (re.compile(r'^[\s]*[-*]\s+\[[ xX]\]'), f('#d97706', bold=True)),
+                # 无序列表标记
+                (re.compile(r'^[\s]*[-*]\s'), f('#6366f1')),
+                # 有序列表标记
+                (re.compile(r'^[\s]*\d+\.\s'), f('#6366f1')),
+                # 表格分隔符
+                (re.compile(r'\|'), f('#64748b')),
+                # 分隔线
+                (re.compile(r'^-{3,}\s*$'), f('#94a3b8')),
+            ]
+        
         self._single_rules = rules
+
+    def _get_theme_colors(self) -> dict[str, str]:
+        """返回当前主题的配色方案。"""
+        if self.theme == "dark":
+            return {
+                "front_matter": "#c084fc",
+                "front_matter_key": "#22d3ee",
+                "front_matter_text": "#a0a0a0",
+                "code_fence": "#86efac",
+                "code_fence_bg": "#1e3a1f",
+                "math_block": "#fbbf24",
+                "math_block_bg": "#2d2413",
+            }
+        else:
+            return {
+                "front_matter": "#c026d3",
+                "front_matter_key": "#0d9488",
+                "front_matter_text": "#6b7280",
+                "code_fence": "#059669",
+                "code_fence_bg": "#f0fdf4",
+                "math_block": "#b45309",
+                "math_block_bg": "#fffbeb",
+            }
 
     def highlightBlock(self, text: str) -> None:  # type: ignore[override]
         prev = self.previousBlockState()
@@ -126,28 +189,31 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         fm_delim = re.compile(r'^---\s*$')
         fence_re = re.compile(r'^```')
         math_re = re.compile(r'^\$\$')
+        
+        colors = self._get_theme_colors()
+        f = self._fmt
 
         # ─── Front Matter（文件首个 --- 开头） ───
         if block_num == 0 and fm_delim.match(text):
             self.setCurrentBlockState(self._STATE_FRONT_MATTER)
-            self.setFormat(0, len(text), self._fmt('#c026d3', bold=True))
+            self.setFormat(0, len(text), f(colors["front_matter"], bold=True))
             return
 
         if prev == self._STATE_FRONT_MATTER:
             if fm_delim.match(text):
                 self.setCurrentBlockState(self._STATE_NORMAL)
-                self.setFormat(0, len(text), self._fmt('#c026d3', bold=True))
+                self.setFormat(0, len(text), f(colors["front_matter"], bold=True))
             else:
                 self.setCurrentBlockState(self._STATE_FRONT_MATTER)
-                self.setFormat(0, len(text), self._fmt('#6b7280'))
+                self.setFormat(0, len(text), f(colors["front_matter_text"]))
                 m = re.match(r'^([a-zA-Z_][\w]*)(\s*:)', text)
                 if m:
-                    self.setFormat(0, m.end(1), self._fmt('#0d9488', bold=True))
+                    self.setFormat(0, m.end(1), f(colors["front_matter_key"], bold=True))
             return
 
         # ─── 代码块 ``` ───
         if prev == self._STATE_CODE_FENCE:
-            self.setFormat(0, len(text), self._fmt('#059669', bg='#f0fdf4'))
+            self.setFormat(0, len(text), f(colors["code_fence"], bg=colors["code_fence_bg"]))
             if fence_re.match(text):
                 self.setCurrentBlockState(self._STATE_NORMAL)
             else:
@@ -155,13 +221,13 @@ class MarkdownHighlighter(QSyntaxHighlighter):
             return
 
         if fence_re.match(text):
-            self.setFormat(0, len(text), self._fmt('#059669', bg='#f0fdf4'))
+            self.setFormat(0, len(text), f(colors["code_fence"], bg=colors["code_fence_bg"]))
             self.setCurrentBlockState(self._STATE_CODE_FENCE)
             return
 
         # ─── 公式块 $$ ───
         if prev == self._STATE_MATH_BLOCK:
-            self.setFormat(0, len(text), self._fmt('#b45309', bg='#fffbeb'))
+            self.setFormat(0, len(text), f(colors["math_block"], bg=colors["math_block_bg"]))
             if math_re.match(text):
                 self.setCurrentBlockState(self._STATE_NORMAL)
             else:
@@ -169,7 +235,7 @@ class MarkdownHighlighter(QSyntaxHighlighter):
             return
 
         if math_re.match(text):
-            self.setFormat(0, len(text), self._fmt('#b45309', bg='#fffbeb'))
+            self.setFormat(0, len(text), f(colors["math_block"], bg=colors["math_block_bg"]))
             self.setCurrentBlockState(self._STATE_MATH_BLOCK)
             return
 
@@ -236,6 +302,23 @@ def get_resource_base_path() -> Path:
     if meipass:
         return Path(meipass)
     return Path(__file__).resolve().parent
+
+
+def detect_system_theme() -> str:
+    """检测系统主题偏好，返回 'dark' 或 'light'。"""
+    try:
+        # 检查 QPalette 背景颜色亮度
+        app = QApplication.instance()
+        if app is None:
+            return "light"
+        
+        palette = app.palette()
+        bg_color = palette.color(QPalette.ColorRole.Window)
+        brightness = bg_color.lightness()
+        
+        return "dark" if brightness < 128 else "light"
+    except Exception:
+        return "light"
 
 
 class RepoCommitConfigDialog(QDialog):
@@ -548,7 +631,7 @@ class MainWindow(QMainWindow):
         self.md_preview = QTextEdit(self)
         self.md_preview.setPlaceholderText("这里实时预览 Markdown 源码...")
         self.md_preview.setReadOnly(True)
-        self._md_highlighter = MarkdownHighlighter(self.md_preview.document())
+        self._md_highlighter = MarkdownHighlighter(self.md_preview.document(), detect_system_theme())
 
         # 同步滚动
         self._scroll_guard = False
@@ -835,13 +918,20 @@ class MainWindow(QMainWindow):
         state: str,
         fallback_icon: QStyle.StandardPixmap,
     ) -> QIcon:
+        # 根据当前主题选择图标目录
+        current_theme = detect_system_theme()
+        if current_theme == "dark":
+            state_dir = f"dark_{state}"
+        else:
+            state_dir = state
+        
         icon_path = (
             get_resource_base_path()
             / "assets"
             / "icons"
             / "theme"
             / str(self._icon_pixel_size)
-            / state
+            / state_dir
             / icon_filename
         )
         if icon_path.exists():
@@ -946,11 +1036,113 @@ class MainWindow(QMainWindow):
         self.setStatusBar(status_bar)
         self.statusBar().showMessage("准备就绪")
 
-    def _apply_styles(self) -> None:
-        self.setStyleSheet(
+    def _get_stylesheet(self, theme: str) -> str:
+        """返回指定主题的样式表。"""
+        if theme == "dark":
+            return """
+            QMainWindow {
+                background: #1e1e1e;
+                color: #e0e0e0;
+            }
+            QToolBar {
+                background: #2d2d2d;
+                border-bottom: 1px solid #3d3d3d;
+                spacing: 6px;
+                padding: 6px;
+            }
+            QToolBar QToolButton {
+                background: #3d3d3d;
+                color: #e0e0e0;
+                border: 1px solid #4d4d4d;
+                border-radius: 4px;
+                padding: 5px 10px;
+            }
+            QToolBar QToolButton:hover {
+                background: #4d4d4d;
+                border: 1px solid #5d5d5d;
+            }
+            QPushButton {
+                background: #3d3d3d;
+                color: #e0e0e0;
+                border: 1px solid #4d4d4d;
+                border-radius: 6px;
+                padding: 6px 10px;
+            }
+            QPushButton:hover {
+                background: #4d4d4d;
+                border: 1px solid #5d5d5d;
+            }
+            QGroupBox {
+                color: #e0e0e0;
+                border: 1px solid #4d4d4d;
+                border-radius: 4px;
+                padding: 8px;
+                margin-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 4px;
+            }
+            QLineEdit {
+                background: #2d2d2d;
+                color: #e0e0e0;
+                border: 1px solid #4d4d4d;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #5d7dd9;
+            }
+            QSpinBox {
+                background: #2d2d2d;
+                color: #e0e0e0;
+                border: 1px solid #4d4d4d;
+                border-radius: 4px;
+                padding: 2px;
+            }
+            QComboBox {
+                background: #3d3d3d;
+                color: #e0e0e0;
+                border: 1px solid #4d4d4d;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QListWidget {
+                background: #2d2d2d;
+                color: #e0e0e0;
+                border: 1px solid #4d4d4d;
+                border-radius: 6px;
+            }
+            QListWidget::item {
+                padding: 6px;
+            }
+            QListWidget::item:selected {
+                background: #5d7dd9;
+                color: #ffffff;
+            }
+            QTextEdit {
+                background: #2d2d2d;
+                color: #e0e0e0;
+                border: 1px solid #4d4d4d;
+                border-radius: 6px;
+                padding: 8px;
+                selection-background-color: #5d7dd9;
+            }
+            QStatusBar {
+                background: #2d2d2d;
+                color: #e0e0e0;
+                border-top: 1px solid #4d4d4d;
+            }
+            QToolButton::menu-indicator {
+                image: none;
+            }
             """
+        else:  # light theme
+            return """
             QMainWindow {
                 background: #f3f4f6;
+                color: #1f2937;
             }
             QToolBar {
                 background: #ffffff;
@@ -960,6 +1152,7 @@ class MainWindow(QMainWindow):
             }
             QToolBar QToolButton {
                 background: #f9fafb;
+                color: #1f2937;
                 border: 1px solid #d1d5db;
                 border-radius: 4px;
                 padding: 5px 10px;
@@ -969,6 +1162,7 @@ class MainWindow(QMainWindow):
             }
             QPushButton {
                 background: #f8fafc;
+                color: #1f2937;
                 border: 1px solid #cbd5e1;
                 border-radius: 6px;
                 padding: 6px 10px;
@@ -976,8 +1170,45 @@ class MainWindow(QMainWindow):
             QPushButton:hover {
                 background: #e2e8f0;
             }
+            QGroupBox {
+                color: #1f2937;
+                border: 1px solid #d1d5db;
+                border-radius: 4px;
+                padding: 8px;
+                margin-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 4px;
+            }
+            QLineEdit {
+                background: #ffffff;
+                color: #1f2937;
+                border: 1px solid #d1d5db;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #3b82f6;
+            }
+            QSpinBox {
+                background: #ffffff;
+                color: #1f2937;
+                border: 1px solid #d1d5db;
+                border-radius: 4px;
+                padding: 2px;
+            }
+            QComboBox {
+                background: #f9fafb;
+                color: #1f2937;
+                border: 1px solid #d1d5db;
+                border-radius: 4px;
+                padding: 4px;
+            }
             QListWidget {
                 background: #ffffff;
+                color: #1f2937;
                 border: 1px solid #d1d5db;
                 border-radius: 6px;
             }
@@ -990,6 +1221,7 @@ class MainWindow(QMainWindow):
             }
             QTextEdit {
                 background: #ffffff;
+                color: #1f2937;
                 border: 1px solid #d1d5db;
                 border-radius: 6px;
                 padding: 8px;
@@ -997,10 +1229,18 @@ class MainWindow(QMainWindow):
             }
             QStatusBar {
                 background: #ffffff;
+                color: #1f2937;
                 border-top: 1px solid #d1d5db;
             }
+            QToolButton::menu-indicator {
+                image: none;
+            }
             """
-        )
+
+    def _apply_styles(self) -> None:
+        """根据系统主题自动应用相应样式。"""
+        theme = detect_system_theme()
+        self.setStyleSheet(self._get_stylesheet(theme))
 
     def _merge_format_on_selection(self, text_format: QTextCharFormat) -> None:
         cursor = self.rich_editor.textCursor()
