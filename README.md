@@ -4,6 +4,8 @@
 
 [English README](README.en.md)
 
+![墨筑图标](assets/icons/mozu.svg)
+
 ![版本](https://img.shields.io/badge/version-1.0-0f766e)
 ![Python](https://img.shields.io/badge/python-3.11+-2563eb)
 ![平台](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-475569)
