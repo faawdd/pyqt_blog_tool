@@ -1,15 +1,21 @@
-# 墨筑 MoZu
+<div align="center">
 
-> 一款专注 Hugo 工作流的本地写作与发布客户端。
+<h1>墨筑 MoZu</h1>
 
-[English README](README.en.md)
+<p>一款专注 Hugo 工作流的本地写作与发布客户端。</p>
 
-![墨筑图标](assets/icons/mozu.svg)
+<p><a href="README.en.md">English README</a></p>
 
-![版本](https://img.shields.io/badge/version-1.0-0f766e)
-![Python](https://img.shields.io/badge/python-3.11+-2563eb)
-![平台](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-475569)
-![协议](https://img.shields.io/badge/license-MIT-16a34a)
+<p><img src="assets/icons/mozu.svg" alt="墨筑图标" width="120"></p>
+
+<p>
+	<img src="https://img.shields.io/badge/version-1.0-0f766e" alt="版本">
+	<img src="https://img.shields.io/badge/python-3.11+-2563eb" alt="Python">
+	<img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-475569" alt="平台">
+	<img src="https://img.shields.io/badge/license-MIT-16a34a" alt="协议">
+</p>
+
+</div>
 
 ## 产品定位
 

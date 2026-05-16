@@ -1,15 +1,21 @@
-# MoZu
+<div align="center">
 
-> A local writing and publishing client focused on Hugo workflows.
+<h1>MoZu</h1>
 
-[中文说明](README.md)
+<p>A local writing and publishing client focused on Hugo workflows.</p>
 
-![MoZu Icon](assets/icons/mozu.svg)
+<p><a href="README.md">中文说明</a></p>
 
-![Version](https://img.shields.io/badge/version-1.0-0f766e)
-![Python](https://img.shields.io/badge/python-3.11+-2563eb)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-475569)
-![License](https://img.shields.io/badge/license-MIT-16a34a)
+<p><img src="assets/icons/mozu.svg" alt="MoZu Icon" width="120"></p>
+
+<p>
+	<img src="https://img.shields.io/badge/version-1.0-0f766e" alt="Version">
+	<img src="https://img.shields.io/badge/python-3.11+-2563eb" alt="Python">
+	<img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-475569" alt="Platform">
+	<img src="https://img.shields.io/badge/license-MIT-16a34a" alt="License">
+</p>
+
+</div>
 
 ## Product Positioning
 
