@@ -11,7 +11,7 @@
 <p>
 	<img src="https://img.shields.io/badge/version-1.0-0f766e" alt="版本">
 	<img src="https://img.shields.io/badge/python-3.11+-2563eb" alt="Python">
-	<img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-475569" alt="平台">
+	<img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-475569" alt="平台">
 	<img src="https://img.shields.io/badge/license-MIT-16a34a" alt="协议">
 </p>
 
@@ -56,7 +56,7 @@
 ### 1. 环境要求
 
 - Python 3.11+
-- Windows 或 macOS
+- Windows、macOS 或 Linux
 
 ### 2. 安装依赖
 
@@ -72,7 +72,22 @@ python pyqt_main_window.py
 
 ## 下载与构建
 
-仓库已配置 GitHub Actions 工作流：推送到 `main` 分支会自动构建，推送 `v*` 标签会自动产出并发布 Windows 与 macOS 安装包（zip）。
+仓库已配置 GitHub Actions 工作流：
+
+- 推送到 `main` 分支会自动构建。
+- 推送 `v*` 标签会自动构建并发布多平台二进制文件到 GitHub Releases。
+
+### 发布产物
+
+- Windows amd64：`Mozhu_Blog_Tool_Windows_x86.zip`（内含单文件 exe）
+- macOS ARM64：`Mozhu_Blog_Tool_Mac_ARM64.zip`（.app）
+- Linux amd64：`Mozhu_Blog_Tool_Linux_amd64.AppImage`
+
+### 打包说明
+
+- Windows 与 Linux 使用 PyInstaller 单文件模式（`-F`）。
+- macOS 使用窗口应用打包并输出 `.app`。
+- 工具栏图标与应用图标统一来源于 `assets/icons/mozu.svg` 视觉风格。
 
 ## 版本信息
 

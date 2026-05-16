@@ -11,7 +11,7 @@
 <p>
 	<img src="https://img.shields.io/badge/version-1.0-0f766e" alt="Version">
 	<img src="https://img.shields.io/badge/python-3.11+-2563eb" alt="Python">
-	<img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-475569" alt="Platform">
+	<img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-475569" alt="Platform">
 	<img src="https://img.shields.io/badge/license-MIT-16a34a" alt="License">
 </p>
 
@@ -56,7 +56,7 @@ Add application screenshots here (main window, editor, publishing flow) for bett
 ### 1. Requirements
 
 - Python 3.11+
-- Windows or macOS
+- Windows, macOS, or Linux
 
 ### 2. Install Dependencies
 
@@ -72,7 +72,22 @@ python pyqt_main_window.py
 
 ## Download And Build
 
-This repository includes a GitHub Actions workflow: pushing to `main` triggers builds, and pushing `v*` tags builds and publishes Windows/macOS zip packages.
+This repository includes a GitHub Actions workflow:
+
+- Pushing to `main` triggers automatic builds.
+- Pushing `v*` tags builds and publishes multi-platform binaries to GitHub Releases.
+
+### Release Artifacts
+
+- Windows amd64: `Mozhu_Blog_Tool_Windows_x86.zip` (contains onefile exe)
+- macOS ARM64: `Mozhu_Blog_Tool_Mac_ARM64.zip` (.app)
+- Linux amd64: `Mozhu_Blog_Tool_Linux_amd64.AppImage`
+
+### Packaging Notes
+
+- Windows and Linux use PyInstaller onefile mode (`-F`).
+- macOS builds a windowed app bundle (`.app`).
+- Toolbar and app icon visuals are unified based on `assets/icons/mozu.svg`.
 
 ## Version
 

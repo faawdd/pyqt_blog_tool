@@ -25,14 +25,20 @@ jobs:
           # Windows x86_64
           - os: windows-latest
             platform_name: Windows x86_64
-            zip_name: Mozhu_Blog_Tool_Windows_x86.zip
+            package_file: Mozhu_Blog_Tool_Windows_x86.zip
             artifact_name: package-windows
 
           # macOS ARM64（Apple Silicon，M 系列芯片）
           - os: macos-14
             platform_name: macOS ARM64
-            zip_name: Mozhu_Blog_Tool_Mac_ARM64.zip
+            package_file: Mozhu_Blog_Tool_Mac_ARM64.zip
             artifact_name: package-macos
+
+          # Linux amd64
+          - os: ubuntu-22.04
+            platform_name: Linux amd64
+            package_file: Mozhu_Blog_Tool_Linux_amd64.AppImage
+            artifact_name: package-linux
 
     defaults:
       run:
@@ -133,26 +139,65 @@ jobs:
         run: |
           pyinstaller -F --windowed --name="墨筑博客工作台" --icon="assets/icons/mozu.icns" --add-data "assets:assets" main.py
 
+      # Linux 平台：使用 -F（--onefile）+ --windowed
+      - name: Build with PyInstaller on Linux
+        if: runner.os == 'Linux'
+        run: |
+          pyinstaller -F --windowed --name="墨筑博客工作台" --add-data "assets:assets" main.py
+
       # Windows 压缩：使用 PowerShell Compress-Archive
       - name: Package Windows build
         if: runner.os == 'Windows'
         shell: pwsh
         working-directory: .
         run: |
-          Compress-Archive -Path "dist/墨筑博客工作台.exe" -DestinationPath "${{ matrix.zip_name }}" -Force
+          Compress-Archive -Path "dist/墨筑博客工作台.exe" -DestinationPath "${{ matrix.package_file }}" -Force
 
       # macOS 压缩：使用 zip -r 打包 .app
       - name: Package macOS build
         if: runner.os == 'macOS'
         run: |
-          zip -r "${{ matrix.zip_name }}" "dist/墨筑博客工作台.app"
+          zip -r "${{ matrix.package_file }}" "dist/墨筑博客工作台.app"
+
+      # Linux AppImage 打包（amd64）
+      - name: Package Linux AppImage
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+
+          cp "dist/墨筑博客工作台" "AppDir/usr/bin/墨筑博客工作台"
+          chmod +x "AppDir/usr/bin/墨筑博客工作台"
+          cp "assets/icons/mozu-256.png" "AppDir/usr/share/icons/hicolor/256x256/apps/mozu-blog-tool.png"
+
+          cat > AppDir/AppRun << 'EOF'
+          #!/usr/bin/env bash
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/墨筑博客工作台" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+
+          cat > AppDir/usr/share/applications/mozu-blog-tool.desktop << 'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=墨筑博客工作台
+          Exec=墨筑博客工作台
+          Icon=mozu-blog-tool
+          Categories=Utility;
+          Terminal=false
+          EOF
+
+          curl -L -o appimagetool-x86_64.AppImage https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir "${{ matrix.package_file }}"
 
       # 上传每个平台构建产物，供后续 Release 作业合并上传
       - name: Upload packaged artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.zip_name }}
+          path: ${{ matrix.package_file }}
           if-no-files-found: error
 
   release:
@@ -176,6 +221,7 @@ jobs:
         with:
           files: |
             release/*.zip
+            release/*.AppImage
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
