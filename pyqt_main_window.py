@@ -581,6 +581,8 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.search_input)
 
         self.sort_combo = QComboBox(left_panel)
+        self.sort_combo.setObjectName("sortCombo")
+        self.sort_combo.setFixedHeight(30)
         self.sort_combo.addItems([
             "按修改时间（新到旧）",
             "按修改时间（旧到新）",
@@ -833,13 +835,17 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         font_controls_widget = QWidget(self)
+        font_controls_widget.setObjectName("fontControls")
         font_controls_layout = QHBoxLayout(font_controls_widget)
         font_controls_layout.setContentsMargins(0, 0, 0, 0)
-        font_controls_layout.setSpacing(4)
+        font_controls_layout.setSpacing(6)
+
+        toolbar_control_height = 30
 
         self.font_family_combo = QFontComboBox(font_controls_widget)
         self.font_family_combo.setMinimumWidth(150)
         self.font_family_combo.setMaximumWidth(190)
+        self.font_family_combo.setFixedHeight(toolbar_control_height)
         self.font_family_combo.setToolTip("选择字体")
         self.font_family_combo.setCurrentFont(self.rich_editor.font())
         self.font_family_combo.currentFontChanged.connect(self.on_font_family_changed)
@@ -848,6 +854,7 @@ class MainWindow(QMainWindow):
         self.font_size_spin = QSpinBox(font_controls_widget)
         self.font_size_spin.setRange(8, 72)
         self.font_size_spin.setFixedWidth(70)
+        self.font_size_spin.setFixedHeight(toolbar_control_height)
         self.font_size_spin.setValue(max(8, int(self.rich_editor.fontPointSize() or 12)))
         self.font_size_spin.setToolTip("选择字号")
         self.font_size_spin.valueChanged.connect(self.on_font_size_changed)
@@ -900,7 +907,7 @@ class MainWindow(QMainWindow):
         self.more_menu_button.setIcon(more_normal_icon)
         self.more_menu_button.setToolTip("更多格式")
         self.more_menu_button.setStatusTip("更多格式")
-        self.more_menu_button.setFixedWidth(34)
+        self.more_menu_button.setFixedSize(34, toolbar_control_height)
         self.more_menu_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.more_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.more_menu = QMenu(self.more_menu_button)
@@ -1038,8 +1045,21 @@ class MainWindow(QMainWindow):
 
     def _get_stylesheet(self, theme: str) -> str:
         """返回指定主题的样式表。"""
+        dark_arrow_path = (
+            get_resource_base_path() / "assets" / "icons" / "down-arrow-dark.svg"
+        ).resolve().as_posix()
+        light_arrow_path = (
+            get_resource_base_path() / "assets" / "icons" / "down-arrow-light.svg"
+        ).resolve().as_posix()
+        dark_up_arrow_path = (
+            get_resource_base_path() / "assets" / "icons" / "up-arrow-dark.svg"
+        ).resolve().as_posix()
+        light_up_arrow_path = (
+            get_resource_base_path() / "assets" / "icons" / "up-arrow-light.svg"
+        ).resolve().as_posix()
+
         if theme == "dark":
-            return """
+            dark_stylesheet = """
             QMainWindow {
                 background: #1e1e1e;
                 color: #e0e0e0;
@@ -1047,19 +1067,79 @@ class MainWindow(QMainWindow):
             QToolBar {
                 background: #2d2d2d;
                 border-bottom: 1px solid #3d3d3d;
-                spacing: 6px;
+                spacing: 8px;
                 padding: 6px;
             }
+            QToolBar::separator {
+                width: 1px;
+                margin: 4px 6px;
+                background: #444444;
+            }
             QToolBar QToolButton {
-                background: #3d3d3d;
+                background: #3b3b3b;
                 color: #e0e0e0;
-                border: 1px solid #4d4d4d;
-                border-radius: 4px;
-                padding: 5px 10px;
+                border: 1px solid #4b4b4b;
+                border-radius: 6px;
+                padding: 0;
+                min-width: 32px;
+                min-height: 30px;
             }
             QToolBar QToolButton:hover {
-                background: #4d4d4d;
-                border: 1px solid #5d5d5d;
+                background: #4a4a4a;
+                border: 1px solid #636363;
+            }
+            QToolBar QToolButton:pressed {
+                background: #565656;
+                border: 1px solid #6d6d6d;
+            }
+            QToolBar QWidget#fontControls {
+                background: transparent;
+            }
+            QToolBar QWidget#fontControls QComboBox,
+            QToolBar QWidget#fontControls QSpinBox {
+                background: #3b3b3b;
+                color: #e0e0e0;
+                border: 1px solid #4b4b4b;
+                border-radius: 6px;
+                padding: 0 8px;
+                min-height: 30px;
+            }
+            QToolBar QWidget#fontControls QComboBox:hover,
+            QToolBar QWidget#fontControls QSpinBox:hover {
+                background: #4a4a4a;
+                border: 1px solid #636363;
+            }
+            QToolBar QWidget#fontControls QComboBox::drop-down {
+                width: 22px;
+                border-left: 1px solid #525252;
+                background: #343434;
+                border-top-right-radius: 6px;
+                border-bottom-right-radius: 6px;
+            }
+            QToolBar QWidget#fontControls QComboBox::down-arrow {
+                image: url(__DOWN_ARROW_DARK__);
+                width: 12px;
+                height: 12px;
+            }
+            QToolBar QWidget#fontControls QSpinBox::up-button,
+            QToolBar QWidget#fontControls QSpinBox::down-button {
+                width: 16px;
+                border-left: 1px solid #525252;
+                background: #343434;
+            }
+            QToolBar QWidget#fontControls QSpinBox::up-button:hover,
+            QToolBar QWidget#fontControls QSpinBox::down-button:hover {
+                background: #414141;
+            }
+            QToolBar QWidget#fontControls QSpinBox::up-arrow {
+                image: url(__UP_ARROW_DARK__);
+                width: 10px;
+                height: 10px;
+            }
+            QToolBar QWidget#fontControls QSpinBox::down-arrow {
+                image: url(__DOWN_ARROW_DARK__);
+                width: 10px;
+                height: 10px;
             }
             QPushButton {
                 background: #3d3d3d;
@@ -1108,6 +1188,33 @@ class MainWindow(QMainWindow):
                 border-radius: 4px;
                 padding: 4px;
             }
+            QComboBox#sortCombo {
+                background: #3b3b3b;
+                color: #e0e0e0;
+                border: 1px solid #4b4b4b;
+                border-radius: 6px;
+                padding: 0 8px;
+                min-height: 30px;
+            }
+            QComboBox#sortCombo:hover {
+                background: #4a4a4a;
+                border: 1px solid #636363;
+            }
+            QComboBox#sortCombo:focus {
+                border: 1px solid #5d7dd9;
+            }
+            QComboBox#sortCombo::drop-down {
+                width: 22px;
+                border-left: 1px solid #525252;
+                background: #343434;
+                border-top-right-radius: 6px;
+                border-bottom-right-radius: 6px;
+            }
+            QComboBox#sortCombo::down-arrow {
+                image: url(__DOWN_ARROW_DARK__);
+                width: 12px;
+                height: 12px;
+            }
             QListWidget {
                 background: #2d2d2d;
                 color: #e0e0e0;
@@ -1138,8 +1245,12 @@ class MainWindow(QMainWindow):
                 image: none;
             }
             """
+            dark_stylesheet = dark_stylesheet.replace(
+                "__DOWN_ARROW_DARK__", f'"{dark_arrow_path}"'
+            )
+            return dark_stylesheet.replace("__UP_ARROW_DARK__", f'"{dark_up_arrow_path}"')
         else:  # light theme
-            return """
+            light_stylesheet = """
             QMainWindow {
                 background: #f3f4f6;
                 color: #1f2937;
@@ -1147,18 +1258,79 @@ class MainWindow(QMainWindow):
             QToolBar {
                 background: #ffffff;
                 border-bottom: 1px solid #d1d5db;
-                spacing: 6px;
+                spacing: 8px;
                 padding: 6px;
+            }
+            QToolBar::separator {
+                width: 1px;
+                margin: 4px 6px;
+                background: #d1d5db;
             }
             QToolBar QToolButton {
                 background: #f9fafb;
                 color: #1f2937;
                 border: 1px solid #d1d5db;
-                border-radius: 4px;
-                padding: 5px 10px;
+                border-radius: 6px;
+                padding: 0;
+                min-width: 32px;
+                min-height: 30px;
             }
             QToolBar QToolButton:hover {
                 background: #eef2ff;
+                border: 1px solid #94a3b8;
+            }
+            QToolBar QToolButton:pressed {
+                background: #dbeafe;
+                border: 1px solid #93c5fd;
+            }
+            QToolBar QWidget#fontControls {
+                background: transparent;
+            }
+            QToolBar QWidget#fontControls QComboBox,
+            QToolBar QWidget#fontControls QSpinBox {
+                background: #f9fafb;
+                color: #1f2937;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                padding: 0 8px;
+                min-height: 30px;
+            }
+            QToolBar QWidget#fontControls QComboBox:hover,
+            QToolBar QWidget#fontControls QSpinBox:hover {
+                background: #eef2ff;
+                border: 1px solid #94a3b8;
+            }
+            QToolBar QWidget#fontControls QComboBox::drop-down {
+                width: 22px;
+                border-left: 1px solid #cbd5e1;
+                background: #f1f5f9;
+                border-top-right-radius: 6px;
+                border-bottom-right-radius: 6px;
+            }
+            QToolBar QWidget#fontControls QComboBox::down-arrow {
+                image: url(__DOWN_ARROW_LIGHT__);
+                width: 12px;
+                height: 12px;
+            }
+            QToolBar QWidget#fontControls QSpinBox::up-button,
+            QToolBar QWidget#fontControls QSpinBox::down-button {
+                width: 16px;
+                border-left: 1px solid #cbd5e1;
+                background: #f1f5f9;
+            }
+            QToolBar QWidget#fontControls QSpinBox::up-button:hover,
+            QToolBar QWidget#fontControls QSpinBox::down-button:hover {
+                background: #e2e8f0;
+            }
+            QToolBar QWidget#fontControls QSpinBox::up-arrow {
+                image: url(__UP_ARROW_LIGHT__);
+                width: 10px;
+                height: 10px;
+            }
+            QToolBar QWidget#fontControls QSpinBox::down-arrow {
+                image: url(__DOWN_ARROW_LIGHT__);
+                width: 10px;
+                height: 10px;
             }
             QPushButton {
                 background: #f8fafc;
@@ -1206,6 +1378,33 @@ class MainWindow(QMainWindow):
                 border-radius: 4px;
                 padding: 4px;
             }
+            QComboBox#sortCombo {
+                background: #f9fafb;
+                color: #1f2937;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                padding: 0 8px;
+                min-height: 30px;
+            }
+            QComboBox#sortCombo:hover {
+                background: #eef2ff;
+                border: 1px solid #94a3b8;
+            }
+            QComboBox#sortCombo:focus {
+                border: 1px solid #3b82f6;
+            }
+            QComboBox#sortCombo::drop-down {
+                width: 22px;
+                border-left: 1px solid #cbd5e1;
+                background: #f1f5f9;
+                border-top-right-radius: 6px;
+                border-bottom-right-radius: 6px;
+            }
+            QComboBox#sortCombo::down-arrow {
+                image: url(__DOWN_ARROW_LIGHT__);
+                width: 12px;
+                height: 12px;
+            }
             QListWidget {
                 background: #ffffff;
                 color: #1f2937;
@@ -1236,6 +1435,12 @@ class MainWindow(QMainWindow):
                 image: none;
             }
             """
+            light_stylesheet = light_stylesheet.replace(
+                "__DOWN_ARROW_LIGHT__", f'"{light_arrow_path}"'
+            )
+            return light_stylesheet.replace(
+                "__UP_ARROW_LIGHT__", f'"{light_up_arrow_path}"'
+            )
 
     def _apply_styles(self) -> None:
         """根据系统主题自动应用相应样式。"""
