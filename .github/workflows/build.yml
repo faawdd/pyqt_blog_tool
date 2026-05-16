@@ -183,11 +183,14 @@ jobs:
           [Desktop Entry]
           Type=Application
           Name=墨筑博客工作台
-          Exec=墨筑博客工作台
+          Exec=AppRun
           Icon=mozu-blog-tool
           Categories=Utility;
           Terminal=false
           EOF
+
+          cp "AppDir/usr/share/applications/mozu-blog-tool.desktop" "AppDir/mozu-blog-tool.desktop"
+          cp "assets/icons/mozu.svg" "AppDir/mozu-blog-tool.svg"
 
           curl -L -o appimagetool-x86_64.AppImage https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool-x86_64.AppImage
