@@ -209,6 +209,7 @@ __appname__ = "墨筑 (MoZu)"
 __version__ = "1.0"
 
 POSTS_RELATIVE_DIR = Path("content/post")
+POSTS_RELATIVE_DIR_CANDIDATES = [Path("content/post"), Path("content/posts")]
 DEFAULT_BRANCH = "main"
 LEGACY_SETTINGS_FILE = Path(__file__).resolve().parent / "app_settings.json"
 
@@ -386,7 +387,11 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.warning(self, "保存失败", f"配置保存失败:\n{exc}")
 
-    def _configured_posts_dir(self, show_warning: bool = True) -> Path | None:
+    def _configured_posts_dir(
+        self,
+        show_warning: bool = True,
+        create_if_missing: bool = False,
+    ) -> Path | None:
         repo_path = self.local_repo_path.strip()
         if not repo_path:
             if show_warning:
@@ -396,7 +401,17 @@ class MainWindow(QMainWindow):
                     "请先点击“仓库设置”配置本地仓库路径。",
                 )
             return None
-        return Path(repo_path) / POSTS_RELATIVE_DIR
+
+        repo_base = Path(repo_path)
+        for relative_dir in POSTS_RELATIVE_DIR_CANDIDATES:
+            candidate = repo_base / relative_dir
+            if candidate.exists() and candidate.is_dir():
+                return candidate
+
+        fallback = repo_base / POSTS_RELATIVE_DIR
+        if create_if_missing:
+            fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
 
     def _ensure_git_identity(self) -> None:
         repo_path = self.local_repo_path.strip()
@@ -1224,7 +1239,11 @@ class MainWindow(QMainWindow):
             self.article_list.clear()
             self.article_records = []
             return
-        posts_dir.mkdir(parents=True, exist_ok=True)
+
+        if not posts_dir.exists():
+            self.article_list.clear()
+            self.article_records = []
+            return
 
         selected_path = str(self.current_article_path) if self.current_article_path else ""
         self.article_records = sorted(
@@ -1318,10 +1337,9 @@ class MainWindow(QMainWindow):
         else:
             filename_md = sanitized
 
-        posts_dir = self._configured_posts_dir(show_warning=True)
+        posts_dir = self._configured_posts_dir(show_warning=True, create_if_missing=True)
         if posts_dir is None:
             return
-        posts_dir.mkdir(parents=True, exist_ok=True)
         article_path = posts_dir / filename_md
         if article_path.exists():
             QMessageBox.warning(self, "已存在", "同名文章已存在，请更换标题或文件名。")
