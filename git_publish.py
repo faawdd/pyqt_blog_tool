@@ -70,10 +70,19 @@ class GitPushThread(QThread):
     def run(self) -> None:
         try:
             repo = Repo(self.repo_path)
-            repo.git.add(".")
+            # Use -A to stage file deletions as well.
+            repo.git.add(A=True)
+
+            has_changes = repo.is_dirty(untracked_files=True)
+            if not has_changes:
+                self.result_signal.emit(True, "没有可提交的变更。")
+                return
+
+            commit_created = False
 
             try:
                 repo.index.commit(self.commit_message)
+                commit_created = True
             except GitCommandError as commit_error:
                 # Allow continue if there is nothing new to commit.
                 if "nothing to commit" not in str(commit_error).lower():
@@ -82,7 +91,23 @@ class GitPushThread(QThread):
                 if "nothing to commit" not in str(commit_error).lower():
                     raise
 
-            repo.remote(name="origin").push(self.branch)
+            if not commit_created:
+                self.result_signal.emit(True, "没有可提交的变更。")
+                return
+
+            target_branch = self.branch
+            try:
+                active_branch = repo.active_branch.name
+            except Exception:
+                active_branch = self.branch
+
+            # Push HEAD explicitly to target branch; fallback to active branch.
+            remote = repo.remote(name="origin")
+            try:
+                remote.push(f"HEAD:{target_branch}")
+            except Exception:
+                remote.push(f"HEAD:{active_branch}")
+
             self.result_signal.emit(True, "已成功推送到 GitHub。")
         except Exception as exc:
             self.result_signal.emit(False, f"推送失败: {exc}")

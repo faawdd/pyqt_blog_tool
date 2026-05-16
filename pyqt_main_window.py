@@ -413,6 +413,25 @@ class MainWindow(QMainWindow):
             fallback.mkdir(parents=True, exist_ok=True)
         return fallback
 
+    def _collect_article_files(self) -> list[Path]:
+        repo_path = self.local_repo_path.strip()
+        if not repo_path:
+            return []
+
+        posts_dir = self._configured_posts_dir(show_warning=False)
+        if posts_dir and posts_dir.exists():
+            files = [p for p in posts_dir.rglob("*.md") if p.name != "_index.md"]
+            if files:
+                return sorted(files, key=lambda p: p.name.lower())
+
+        # 回退策略：当仓库结构不含 content/post(s) 时，扫描 content 下全部文章。
+        content_dir = Path(repo_path) / "content"
+        if not content_dir.exists():
+            return []
+
+        files = [p for p in content_dir.rglob("*.md") if p.name != "_index.md"]
+        return sorted(files, key=lambda p: p.name.lower())
+
     def _ensure_git_identity(self) -> None:
         repo_path = self.local_repo_path.strip()
         if not repo_path:
@@ -1234,22 +1253,13 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(3000, lambda: self.statusBar().showMessage("准备就绪"))
 
     def refresh_article_list(self) -> None:
-        posts_dir = self._configured_posts_dir(show_warning=False)
-        if posts_dir is None:
-            self.article_list.clear()
-            self.article_records = []
-            return
-
-        if not posts_dir.exists():
+        if not self.local_repo_path.strip():
             self.article_list.clear()
             self.article_records = []
             return
 
         selected_path = str(self.current_article_path) if self.current_article_path else ""
-        self.article_records = sorted(
-            (p for p in posts_dir.rglob("*.md") if p.name != "_index.md"),
-            key=lambda p: p.name.lower(),
-        )
+        self.article_records = self._collect_article_files()
 
         search_text = self.search_input.text().strip().lower()
         filtered = [
