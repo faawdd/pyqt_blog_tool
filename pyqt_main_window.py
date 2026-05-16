@@ -4,7 +4,17 @@ import re
 from datetime import datetime
 
 from PyQt6.QtCore import QEvent, QSize, Qt, QTimer
-from PyQt6.QtGui import QAction, QFont, QIcon, QResizeEvent, QTextCharFormat, QTextCursor
+from PyQt6.QtGui import (
+    QAction,
+    QColor,
+    QFont,
+    QIcon,
+    QPainter,
+    QResizeEvent,
+    QSyntaxHighlighter,
+    QTextCharFormat,
+    QTextCursor,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -23,6 +33,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QSpinBox,
     QStatusBar,
@@ -39,9 +50,164 @@ from git_publish import GitPushThread, RepoSyncThread, build_front_matter
 from git import Repo
 
 
+class MarkdownHighlighter(QSyntaxHighlighter):
+    """Markdown 语法高亮器，应用于 Markdown 预览面板。"""
+
+    # 多行状态常量
+    _STATE_NORMAL = 0
+    _STATE_FRONT_MATTER = 1
+    _STATE_CODE_FENCE = 2
+    _STATE_MATH_BLOCK = 3
+
+    def __init__(self, document) -> None:
+        super().__init__(document)
+        self._single_rules: list[tuple[re.Pattern, QTextCharFormat]] = []
+        self._setup_rules()
+
+    @staticmethod
+    def _fmt(
+        color: str,
+        bold: bool = False,
+        italic: bool = False,
+        bg: str | None = None,
+    ) -> QTextCharFormat:
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(color))
+        if bold:
+            fmt.setFontWeight(QFont.Weight.Bold)
+        if italic:
+            fmt.setFontItalic(True)
+        if bg:
+            fmt.setBackground(QColor(bg))
+        return fmt
+
+    def _setup_rules(self) -> None:
+        f = self._fmt
+        rules: list[tuple[re.Pattern, QTextCharFormat]] = [
+            # 标题 # 到 ######
+            (re.compile(r'^#{1,6}(?!#) .+'), f('#1d4ed8', bold=True)),
+            # 加粗 **text** / __text__
+            (re.compile(r'\*\*[^*\n]+\*\*'), f('#7c3aed', bold=True)),
+            (re.compile(r'__[^_\n]+__'), f('#7c3aed', bold=True)),
+            # 斜体 *text* / _text_
+            (re.compile(r'(?<!\*)\*(?!\*)[^*\n]+(?<!\*)\*(?!\*)'), f('#0891b2', italic=True)),
+            (re.compile(r'(?<!_)_(?!_)[^_\n]+(?<!_)_(?!_)'), f('#0891b2', italic=True)),
+            # 行内代码 `code`
+            (re.compile(r'`[^`\n]+`'), f('#059669', bg='#f0fdf4')),
+            # 行内公式 $...$
+            (re.compile(r'\$[^$\n]+\$'), f('#b45309', bg='#fffbeb')),
+            # 引用块 > ...
+            (re.compile(r'^>.*'), f('#78716c', italic=True)),
+            # 图片 ![alt](url) 先于链接处理
+            (re.compile(r'!\[[^\]]*\]\([^)]+\)'), f('#0d9488')),
+            # 链接 [text](url)
+            (re.compile(r'\[[^\]]+\]\([^)]+\)'), f('#0369a1')),
+            # 角标/脚注 [^1] 彩色高亮
+            (re.compile(r'\[\^[0-9a-zA-Z]+\]'), f('#e11d48', bold=True, bg='#fdf2f8')),
+            # 任务列表 - [ ] / - [x]
+            (re.compile(r'^[\s]*[-*]\s+\[[ xX]\]'), f('#d97706', bold=True)),
+            # 无序列表标记 - / *
+            (re.compile(r'^[\s]*[-*]\s'), f('#6366f1')),
+            # 有序列表标记 1. 2.
+            (re.compile(r'^[\s]*\d+\.\s'), f('#6366f1')),
+            # 表格分隔符
+            (re.compile(r'\|'), f('#64748b')),
+            # 分隔线 ---
+            (re.compile(r'^-{3,}\s*$'), f('#94a3b8')),
+        ]
+        self._single_rules = rules
+
+    def highlightBlock(self, text: str) -> None:  # type: ignore[override]
+        prev = self.previousBlockState()
+        block_num = self.currentBlock().blockNumber()
+        fm_delim = re.compile(r'^---\s*$')
+        fence_re = re.compile(r'^```')
+        math_re = re.compile(r'^\$\$')
+
+        # ─── Front Matter（文件首个 --- 开头） ───
+        if block_num == 0 and fm_delim.match(text):
+            self.setCurrentBlockState(self._STATE_FRONT_MATTER)
+            self.setFormat(0, len(text), self._fmt('#c026d3', bold=True))
+            return
+
+        if prev == self._STATE_FRONT_MATTER:
+            if fm_delim.match(text):
+                self.setCurrentBlockState(self._STATE_NORMAL)
+                self.setFormat(0, len(text), self._fmt('#c026d3', bold=True))
+            else:
+                self.setCurrentBlockState(self._STATE_FRONT_MATTER)
+                self.setFormat(0, len(text), self._fmt('#6b7280'))
+                m = re.match(r'^([a-zA-Z_][\w]*)(\s*:)', text)
+                if m:
+                    self.setFormat(0, m.end(1), self._fmt('#0d9488', bold=True))
+            return
+
+        # ─── 代码块 ``` ───
+        if prev == self._STATE_CODE_FENCE:
+            self.setFormat(0, len(text), self._fmt('#059669', bg='#f0fdf4'))
+            if fence_re.match(text):
+                self.setCurrentBlockState(self._STATE_NORMAL)
+            else:
+                self.setCurrentBlockState(self._STATE_CODE_FENCE)
+            return
+
+        if fence_re.match(text):
+            self.setFormat(0, len(text), self._fmt('#059669', bg='#f0fdf4'))
+            self.setCurrentBlockState(self._STATE_CODE_FENCE)
+            return
+
+        # ─── 公式块 $$ ───
+        if prev == self._STATE_MATH_BLOCK:
+            self.setFormat(0, len(text), self._fmt('#b45309', bg='#fffbeb'))
+            if math_re.match(text):
+                self.setCurrentBlockState(self._STATE_NORMAL)
+            else:
+                self.setCurrentBlockState(self._STATE_MATH_BLOCK)
+            return
+
+        if math_re.match(text):
+            self.setFormat(0, len(text), self._fmt('#b45309', bg='#fffbeb'))
+            self.setCurrentBlockState(self._STATE_MATH_BLOCK)
+            return
+
+        # ─── 普通行：应用单行规则 ───
+        self.setCurrentBlockState(self._STATE_NORMAL)
+        for pattern, fmt in self._single_rules:
+            for m in pattern.finditer(text):
+                self.setFormat(m.start(), m.end() - m.start(), fmt)
+
+
+class ElidedLabel(QLabel):
+    """自动用省略号截断过长文本的 QLabel。
+
+    重写 sizeHint / minimumSizeHint，使水平方向不随文本内容撑大布局。
+    """
+
+    def sizeHint(self):
+        hint = super().sizeHint()
+        hint.setWidth(50)
+        return hint
+
+    def minimumSizeHint(self):
+        hint = super().minimumSizeHint()
+        hint.setWidth(50)
+        return hint
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        painter = QPainter(self)
+        metrics = self.fontMetrics()
+        elided = metrics.elidedText(self.text(), Qt.TextElideMode.ElideRight, self.width())
+        painter.drawText(self.rect(), self.alignment() | Qt.AlignmentFlag.AlignVCenter, elided)
+
+
+
+# 应用信息
+__appname__ = "墨筑 (MoZu)"
+__version__ = "1.0"
+
 LOCAL_REPO_PATH = r"c:\Users\14434\my-blog"
 REMOTE_REPO_URL = "https://github.com/faawdd/my-blog.git"
-POSTS_RELATIVE_DIR = Path("content/posts")
+POSTS_RELATIVE_DIR = Path("content/post")
 GIT_BRANCH = "main"
 GIT_USER_NAME = "faawdd"
 GIT_USER_EMAIL = "1443469207@qq.com"
@@ -50,7 +216,10 @@ GIT_USER_EMAIL = "1443469207@qq.com"
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("本地 Hugo 博客写作工具")
+        self.setWindowTitle(f"{__appname__} 博客工具 v{__version__}")
+        # 设置应用图标
+        icon_path = str(Path(__file__).resolve().parent / "assets" / "icons" / "mozu.svg")
+        self.setWindowIcon(QIcon(icon_path))
         self.resize(1200, 760)
         self.last_docx_path: str | None = None
         self.git_thread: GitPushThread | None = None
@@ -87,10 +256,20 @@ class MainWindow(QMainWindow):
             pass
 
     def _setup_editors(self) -> None:
+
         left_panel = QWidget(self)
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(8, 8, 8, 8)
         left_layout.setSpacing(8)
+
+        # 软件名称标签
+        app_title = QLabel(f"{__appname__} 博客工具 v{__version__}", left_panel)
+        font = app_title.font()
+        font.setPointSize(16)
+        font.setBold(True)
+        app_title.setFont(font)
+        app_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left_layout.addWidget(app_title)
 
         left_header_layout = QHBoxLayout()
         self.sync_repo_button = QPushButton("同步仓库", left_panel)
@@ -126,11 +305,17 @@ class MainWindow(QMainWindow):
         self.sort_combo.currentIndexChanged.connect(self.on_filter_or_sort_changed)
         left_layout.addWidget(self.sort_combo)
 
-        self.article_title_label = QLabel("当前文章: 未选择", left_panel)
+        self.article_title_label = ElidedLabel("当前文章: 未选择", left_panel)
+        self.article_title_label.setMinimumWidth(0)
         left_layout.addWidget(self.article_title_label)
 
         self.article_list = QListWidget(left_panel)
         self.article_list.itemClicked.connect(self.on_article_item_clicked)
+        self.article_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.article_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.article_list.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding
+        )
         left_layout.addWidget(self.article_list)
 
         meta_group = QGroupBox("Front Matter", left_panel)
@@ -162,12 +347,50 @@ class MainWindow(QMainWindow):
         self.md_preview = QTextEdit(self)
         self.md_preview.setPlaceholderText("这里实时预览 Markdown 源码...")
         self.md_preview.setReadOnly(True)
+        self._md_highlighter = MarkdownHighlighter(self.md_preview.document())
+
+        # 同步滚动
+        self._scroll_guard = False
+
+        def _sync_scroll_to_preview(value: int) -> None:
+            if self._scroll_guard:
+                return
+            preview_bar = self.md_preview.verticalScrollBar()
+            editor_bar = self.rich_editor.verticalScrollBar()
+            if editor_bar.maximum() == 0:
+                return
+            ratio = value / editor_bar.maximum()
+            self._scroll_guard = True
+            preview_bar.setValue(int(ratio * preview_bar.maximum()))
+            self._scroll_guard = False
+
+        def _sync_scroll_to_editor(value: int) -> None:
+            if self._scroll_guard:
+                return
+            editor_bar = self.rich_editor.verticalScrollBar()
+            preview_bar = self.md_preview.verticalScrollBar()
+            if preview_bar.maximum() == 0:
+                return
+            ratio = value / preview_bar.maximum()
+            self._scroll_guard = True
+            editor_bar.setValue(int(ratio * editor_bar.maximum()))
+            self._scroll_guard = False
+
+        self.rich_editor.verticalScrollBar().valueChanged.connect(_sync_scroll_to_preview)
+        self.md_preview.verticalScrollBar().valueChanged.connect(_sync_scroll_to_editor)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(left_panel)
         splitter.addWidget(self.rich_editor)
         splitter.addWidget(self.md_preview)
         splitter.setSizes([280, 560, 560])
+        splitter.setStretchFactor(0, 0)  # 左侧栏：不随窗口拉伸
+        splitter.setStretchFactor(1, 1)  # 编辑区：按比例伸缩
+        splitter.setStretchFactor(2, 1)  # 预览区：按比例伸缩
+        left_panel.setMaximumWidth(400)
+        left_panel.setSizePolicy(
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred
+        )
 
         self.setCentralWidget(splitter)
         self.refresh_article_list()
@@ -802,7 +1025,10 @@ class MainWindow(QMainWindow):
         posts_dir.mkdir(parents=True, exist_ok=True)
 
         selected_path = str(self.current_article_path) if self.current_article_path else ""
-        self.article_records = sorted(posts_dir.glob("*.md"), key=lambda p: p.name.lower())
+        self.article_records = sorted(
+            (p for p in posts_dir.rglob("*.md") if p.name != "_index.md"),
+            key=lambda p: p.name.lower(),
+        )
 
         search_text = self.search_input.text().strip().lower()
         filtered = [
@@ -851,7 +1077,8 @@ class MainWindow(QMainWindow):
 
         title = self._extract_title(front_matter) or article_path.stem
         self.article_title_label.setText(f"当前文章: {title}")
-        self.setWindowTitle(f"本地 Hugo 博客写作工具 - {title}")
+        self.article_title_label.setToolTip(title)
+        self.setWindowTitle(f"{__appname__} 博客工具 v{__version__} - {title}")
 
         self._metadata_updating = True
         self.fm_title_input.setText(title)
@@ -869,24 +1096,36 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"已加载: {article_path.name}", 2500)
 
     def on_new_article(self) -> None:
-        filename, ok = QInputDialog.getText(self, "新建文章", "请输入文章文件名:")
+        filename, ok = QInputDialog.getText(self, "新建文章", "请输入文章标题或文件名：")
         if not ok or not filename.strip():
             return
 
-        sanitized = re.sub(r'[^a-zA-Z0-9\-_.]+', "-", filename.strip()).strip(".-")
+        # 允许用户输入中文标题，自动转为文件名
+        title = filename.strip()
+        # 文件名仅保留字母数字下划线和短横线，中文转拼音可选，这里直接用短横线替换
+        sanitized = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5\-_]+', "-", title).strip(".-")
+        # 去除多余的连续短横线
+        sanitized = re.sub(r'-+', '-', sanitized)
         if not sanitized:
-            QMessageBox.warning(self, "无效名称", "文章文件名不能为空。")
+            QMessageBox.warning(self, "无效名称", "文章标题不能为空。")
             return
+
+        # 自动补全.md后缀
+        if not sanitized.lower().endswith('.md'):
+            filename_md = sanitized + '.md'
+        else:
+            filename_md = sanitized
 
         posts_dir = Path(LOCAL_REPO_PATH) / POSTS_RELATIVE_DIR
         posts_dir.mkdir(parents=True, exist_ok=True)
-        article_path = posts_dir / f"{sanitized}.md"
+        article_path = posts_dir / filename_md
         if article_path.exists():
-            QMessageBox.warning(self, "已存在", "同名文章已存在，请更换文件名。")
+            QMessageBox.warning(self, "已存在", "同名文章已存在，请更换标题或文件名。")
             return
 
+        # front matter 的 title 字段用原始输入
         initial_front_matter = build_front_matter(
-            sanitized.replace("-", " "),
+            title,
             tags=[],
             categories=[],
             draft=False,
@@ -994,6 +1233,7 @@ class MainWindow(QMainWindow):
             date_iso=date_iso,
         )
         self.article_title_label.setText(f"当前文章: {title or '未命名'}")
+        self.article_title_label.setToolTip(title or '未命名')
 
     def start_git_push(self, commit_message: str) -> None:
         if self.git_thread and self.git_thread.isRunning():
