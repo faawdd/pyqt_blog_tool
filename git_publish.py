@@ -120,9 +120,24 @@ class RepoSyncThread(QThread):
 
             if not git_dir.exists():
                 if self.local_repo_path.exists() and any(self.local_repo_path.iterdir()):
-                    raise RuntimeError(
-                        "本地目录已存在且非空，但不是 Git 仓库，无法自动 clone。"
+                    # 目录非空但非 Git 仓库：就地 init 并关联远端
+                    repo = Repo.init(str(self.local_repo_path))
+                    self._ensure_repo_identity(repo)
+                    origin = repo.create_remote("origin", self.remote_repo_url)
+                    try:
+                        origin.fetch()
+                        remote_refs = [ref.name for ref in origin.refs]
+                        tracking = f"origin/{self.branch}"
+                        if tracking in remote_refs:
+                            repo.git.checkout("-b", self.branch, tracking)
+                    except GitCommandError:
+                        # 远端为空或分支不存在，本地已 init 完成，忽略 fetch 错误
+                        pass
+                    self.result_signal.emit(
+                        True,
+                        "已在现有目录初始化 Git 仓库并关联远端，请确认本地文件后再推送。",
                     )
+                    return
                 self.local_repo_path.mkdir(parents=True, exist_ok=True)
                 Repo.clone_from(
                     self.remote_repo_url,
