@@ -62,6 +62,7 @@ jobs:
           pip install pyqt6 gitpython mammoth html2text pyinstaller pillow
 
       - name: Generate app icon assets from SVG
+        if: runner.os != 'Linux'
         run: |
           python - << 'PY'
           from pathlib import Path
@@ -165,11 +166,11 @@ jobs:
         run: |
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/applications
-          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          mkdir -p AppDir/usr/share/icons/hicolor/scalable/apps
 
           cp "dist/墨筑博客工作台" "AppDir/usr/bin/墨筑博客工作台"
           chmod +x "AppDir/usr/bin/墨筑博客工作台"
-          cp "assets/icons/mozu-256.png" "AppDir/usr/share/icons/hicolor/256x256/apps/mozu-blog-tool.png"
+          cp "assets/icons/mozu.svg" "AppDir/usr/share/icons/hicolor/scalable/apps/mozu-blog-tool.svg"
 
           cat > AppDir/AppRun << 'EOF'
           #!/usr/bin/env bash
