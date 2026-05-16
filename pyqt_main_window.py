@@ -1,9 +1,10 @@
 import sys
 from pathlib import Path
 import re
+import json
 from datetime import datetime
 
-from PyQt6.QtCore import QEvent, QSize, Qt, QTimer
+from PyQt6.QtCore import QEvent, QSize, Qt, QTimer, QStandardPaths
 from PyQt6.QtGui import (
     QAction,
     QColor,
@@ -19,6 +20,8 @@ from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFontComboBox,
     QFormLayout,
@@ -205,12 +208,96 @@ class ElidedLabel(QLabel):
 __appname__ = "墨筑 (MoZu)"
 __version__ = "1.0"
 
-LOCAL_REPO_PATH = r"c:\Users\14434\my-blog"
-REMOTE_REPO_URL = "https://github.com/faawdd/my-blog.git"
 POSTS_RELATIVE_DIR = Path("content/post")
-GIT_BRANCH = "main"
-GIT_USER_NAME = "faawdd"
-GIT_USER_EMAIL = "1443469207@qq.com"
+DEFAULT_BRANCH = "main"
+LEGACY_SETTINGS_FILE = Path(__file__).resolve().parent / "app_settings.json"
+
+
+def get_settings_file_path() -> Path:
+    config_base = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.AppConfigLocation
+    )
+    if not config_base:
+        # Fallback when Qt cannot resolve platform config dir.
+        return LEGACY_SETTINGS_FILE
+
+    settings_dir = Path(config_base) / "MoZu"
+    settings_dir.mkdir(parents=True, exist_ok=True)
+    return settings_dir / "app_settings.json"
+
+
+SETTINGS_FILE = get_settings_file_path()
+
+
+class RepoCommitConfigDialog(QDialog):
+    def __init__(
+        self,
+        local_repo_path: str,
+        remote_repo_url: str,
+        branch: str,
+        git_user_name: str,
+        git_user_email: str,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("仓库与提交配置")
+        self.resize(560, 260)
+
+        layout = QVBoxLayout(self)
+
+        repo_group = QGroupBox("仓库配置", self)
+        repo_form = QFormLayout(repo_group)
+        self.repo_path_input = QLineEdit(local_repo_path, self)
+        self.remote_url_input = QLineEdit(remote_repo_url, self)
+        self.branch_input = QLineEdit(branch or DEFAULT_BRANCH, self)
+
+        commit_group = QGroupBox("提交配置", self)
+        commit_form = QFormLayout(commit_group)
+        self.user_name_input = QLineEdit(git_user_name, self)
+        self.user_email_input = QLineEdit(git_user_email, self)
+
+        browse_button = QPushButton("浏览...", self)
+        browse_button.clicked.connect(self.on_browse_repo_path)
+        repo_path_row = QHBoxLayout()
+        repo_path_row.addWidget(self.repo_path_input)
+        repo_path_row.addWidget(browse_button)
+
+        repo_form.addRow("本地仓库路径", self._wrap_layout(repo_path_row))
+        repo_form.addRow("远端仓库 URL", self.remote_url_input)
+        repo_form.addRow("分支", self.branch_input)
+
+        commit_form.addRow("提交用户名", self.user_name_input)
+        commit_form.addRow("提交邮箱", self.user_email_input)
+
+        layout.addWidget(repo_group)
+        layout.addWidget(commit_group)
+
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            self,
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def _wrap_layout(self, row_layout: QHBoxLayout) -> QWidget:
+        wrapper = QWidget(self)
+        wrapper.setLayout(row_layout)
+        return wrapper
+
+    def on_browse_repo_path(self) -> None:
+        selected = QFileDialog.getExistingDirectory(self, "选择本地仓库目录")
+        if selected:
+            self.repo_path_input.setText(selected)
+
+    def values(self) -> dict[str, str]:
+        return {
+            "local_repo_path": self.repo_path_input.text().strip(),
+            "remote_repo_url": self.remote_url_input.text().strip(),
+            "branch": self.branch_input.text().strip() or DEFAULT_BRANCH,
+            "git_user_name": self.user_name_input.text().strip(),
+            "git_user_email": self.user_email_input.text().strip(),
+        }
 
 
 class MainWindow(QMainWindow):
@@ -236,21 +323,89 @@ class MainWindow(QMainWindow):
         self._compact_widgets: list[QWidget] = []
         self._compact_measure_in_progress = False
 
+        self.local_repo_path = ""
+        self.remote_repo_url = ""
+        self.git_branch = DEFAULT_BRANCH
+        self.git_user_name = ""
+        self.git_user_email = ""
+
+        self._load_settings()
+
         self._ensure_git_identity()
         self._setup_editors()
         self._setup_toolbar()
         self._setup_statusbar()
         self._apply_styles()
 
-    def _ensure_git_identity(self) -> None:
-        repo_git_dir = Path(LOCAL_REPO_PATH) / ".git"
-        if not repo_git_dir.exists():
+    def _load_settings(self) -> None:
+        if not SETTINGS_FILE.exists() and LEGACY_SETTINGS_FILE.exists():
+            try:
+                SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+                SETTINGS_FILE.write_text(
+                    LEGACY_SETTINGS_FILE.read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
+            except Exception:
+                # Ignore migration failure and continue with current state.
+                pass
+
+        if not SETTINGS_FILE.exists():
             return
         try:
-            repo = Repo(LOCAL_REPO_PATH)
+            raw = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return
+
+        self.local_repo_path = str(raw.get("local_repo_path", "")).strip()
+        self.remote_repo_url = str(raw.get("remote_repo_url", "")).strip()
+        self.git_branch = str(raw.get("branch", DEFAULT_BRANCH)).strip() or DEFAULT_BRANCH
+        self.git_user_name = str(raw.get("git_user_name", "")).strip()
+        self.git_user_email = str(raw.get("git_user_email", "")).strip()
+
+    def _save_settings(self) -> None:
+        data = {
+            "local_repo_path": self.local_repo_path,
+            "remote_repo_url": self.remote_repo_url,
+            "branch": self.git_branch,
+            "git_user_name": self.git_user_name,
+            "git_user_email": self.git_user_email,
+        }
+        try:
+            SETTINGS_FILE.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "保存失败", f"配置保存失败:\n{exc}")
+
+    def _configured_posts_dir(self, show_warning: bool = True) -> Path | None:
+        repo_path = self.local_repo_path.strip()
+        if not repo_path:
+            if show_warning:
+                QMessageBox.warning(
+                    self,
+                    "未配置仓库",
+                    "请先点击“仓库设置”配置本地仓库路径。",
+                )
+            return None
+        return Path(repo_path) / POSTS_RELATIVE_DIR
+
+    def _ensure_git_identity(self) -> None:
+        repo_path = self.local_repo_path.strip()
+        if not repo_path:
+            return
+
+        repo_git_dir = Path(repo_path) / ".git"
+        if not repo_git_dir.exists():
+            return
+        if not (self.git_user_name and self.git_user_email):
+            return
+
+        try:
+            repo = Repo(repo_path)
             with repo.config_writer() as config_writer:
-                config_writer.set_value("user", "name", GIT_USER_NAME)
-                config_writer.set_value("user", "email", GIT_USER_EMAIL)
+                config_writer.set_value("user", "name", self.git_user_name)
+                config_writer.set_value("user", "email", self.git_user_email)
         except Exception:
             # Keep UI available even if local git config write fails.
             pass
@@ -276,12 +431,16 @@ class MainWindow(QMainWindow):
         self.sync_repo_button.clicked.connect(self.on_sync_repo)
         left_header_layout.addWidget(self.sync_repo_button)
 
-        self.new_post_button = QPushButton("新建文章", left_panel)
-        self.new_post_button.clicked.connect(self.on_new_article)
-        left_header_layout.addWidget(self.new_post_button)
+        self.repo_config_button = QPushButton("仓库设置", left_panel)
+        self.repo_config_button.clicked.connect(self.on_open_repo_config)
+        left_header_layout.addWidget(self.repo_config_button)
         left_layout.addLayout(left_header_layout)
 
         left_manage_layout = QHBoxLayout()
+        self.new_post_button = QPushButton("新建文章", left_panel)
+        self.new_post_button.clicked.connect(self.on_new_article)
+        left_manage_layout.addWidget(self.new_post_button)
+
         self.rename_post_button = QPushButton("重命名", left_panel)
         self.rename_post_button.clicked.connect(self.on_rename_article)
         left_manage_layout.addWidget(self.rename_post_button)
@@ -994,17 +1153,48 @@ class MainWindow(QMainWindow):
             candidate += 1
         return candidate
 
+    def on_open_repo_config(self) -> None:
+        dialog = RepoCommitConfigDialog(
+            local_repo_path=self.local_repo_path,
+            remote_repo_url=self.remote_repo_url,
+            branch=self.git_branch,
+            git_user_name=self.git_user_name,
+            git_user_email=self.git_user_email,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        values = dialog.values()
+        self.local_repo_path = values["local_repo_path"]
+        self.remote_repo_url = values["remote_repo_url"]
+        self.git_branch = values["branch"]
+        self.git_user_name = values["git_user_name"]
+        self.git_user_email = values["git_user_email"]
+
+        self._save_settings()
+        self._ensure_git_identity()
+        self.refresh_article_list()
+        self.statusBar().showMessage("仓库与提交配置已保存", 2500)
+
     def on_sync_repo(self) -> None:
         if self.repo_sync_thread and self.repo_sync_thread.isRunning():
             return
 
+        if not self.local_repo_path:
+            QMessageBox.warning(self, "未配置仓库", "请先在“仓库设置”中配置本地仓库路径。")
+            return
+        if not self.remote_repo_url:
+            QMessageBox.warning(self, "未配置仓库", "请先在“仓库设置”中配置远端仓库 URL。")
+            return
+
         self.statusBar().showMessage("正在拉取仓库...")
         self.repo_sync_thread = RepoSyncThread(
-            local_repo_path=LOCAL_REPO_PATH,
-            remote_repo_url=REMOTE_REPO_URL,
-            branch=GIT_BRANCH,
-            git_user_name=GIT_USER_NAME,
-            git_user_email=GIT_USER_EMAIL,
+            local_repo_path=self.local_repo_path,
+            remote_repo_url=self.remote_repo_url,
+            branch=self.git_branch,
+            git_user_name=self.git_user_name,
+            git_user_email=self.git_user_email,
             parent=self,
         )
         self.repo_sync_thread.result_signal.connect(self.on_repo_sync_result)
@@ -1021,7 +1211,11 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(3000, lambda: self.statusBar().showMessage("准备就绪"))
 
     def refresh_article_list(self) -> None:
-        posts_dir = Path(LOCAL_REPO_PATH) / POSTS_RELATIVE_DIR
+        posts_dir = self._configured_posts_dir(show_warning=False)
+        if posts_dir is None:
+            self.article_list.clear()
+            self.article_records = []
+            return
         posts_dir.mkdir(parents=True, exist_ok=True)
 
         selected_path = str(self.current_article_path) if self.current_article_path else ""
@@ -1116,7 +1310,9 @@ class MainWindow(QMainWindow):
         else:
             filename_md = sanitized
 
-        posts_dir = Path(LOCAL_REPO_PATH) / POSTS_RELATIVE_DIR
+        posts_dir = self._configured_posts_dir(show_warning=True)
+        if posts_dir is None:
+            return
         posts_dir.mkdir(parents=True, exist_ok=True)
         article_path = posts_dir / filename_md
         if article_path.exists():
@@ -1240,9 +1436,13 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "当前已有 Git 推送任务正在执行。")
             return
 
+        if not self.local_repo_path:
+            QMessageBox.warning(self, "未配置仓库", "请先在“仓库设置”中配置本地仓库路径。")
+            return
+
         self.git_thread = GitPushThread(
-            repo_path=LOCAL_REPO_PATH,
-            branch=GIT_BRANCH,
+            repo_path=self.local_repo_path,
+            branch=self.git_branch,
             commit_message=commit_message,
             parent=self,
         )
