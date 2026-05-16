@@ -53,7 +53,59 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install pyqt6 gitpython mammoth html2text pyinstaller
+          pip install pyqt6 gitpython mammoth html2text pyinstaller pillow
+
+      - name: Generate app icon assets from SVG
+        run: |
+          python - << 'PY'
+          from pathlib import Path
+          from PyQt6.QtCore import QRectF, Qt
+          from PyQt6.QtGui import QImage, QPainter
+          from PyQt6.QtSvg import QSvgRenderer
+          from PIL import Image
+
+          src = Path("assets/icons/mozu.svg")
+          out_dir = Path("assets/icons")
+          renderer = QSvgRenderer(str(src))
+          if not renderer.isValid():
+              raise SystemExit("SVG icon is invalid: assets/icons/mozu.svg")
+
+          sizes = [16, 32, 48, 64, 128, 256, 512, 1024]
+          png_files = []
+          for size in sizes:
+              img = QImage(size, size, QImage.Format.Format_ARGB32)
+              img.fill(Qt.GlobalColor.transparent)
+              painter = QPainter(img)
+              renderer.render(painter, QRectF(0, 0, size, size))
+              painter.end()
+              png = out_dir / f"mozu-{size}.png"
+              img.save(str(png))
+              png_files.append(png)
+
+          ico_base = Image.open(str(out_dir / "mozu-256.png"))
+          ico_base.save(
+              str(out_dir / "mozu.ico"),
+              format="ICO",
+              sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+          )
+          PY
+
+      - name: Build macOS .icns from generated PNGs
+        if: runner.os == 'macOS'
+        run: |
+          rm -rf build/mozu.iconset
+          mkdir -p build/mozu.iconset
+          cp assets/icons/mozu-16.png build/mozu.iconset/icon_16x16.png
+          cp assets/icons/mozu-32.png build/mozu.iconset/icon_16x16@2x.png
+          cp assets/icons/mozu-32.png build/mozu.iconset/icon_32x32.png
+          cp assets/icons/mozu-64.png build/mozu.iconset/icon_32x32@2x.png
+          cp assets/icons/mozu-128.png build/mozu.iconset/icon_128x128.png
+          cp assets/icons/mozu-256.png build/mozu.iconset/icon_128x128@2x.png
+          cp assets/icons/mozu-256.png build/mozu.iconset/icon_256x256.png
+          cp assets/icons/mozu-512.png build/mozu.iconset/icon_256x256@2x.png
+          cp assets/icons/mozu-512.png build/mozu.iconset/icon_512x512.png
+          cp assets/icons/mozu-1024.png build/mozu.iconset/icon_512x512@2x.png
+          iconutil -c icns build/mozu.iconset -o assets/icons/mozu.icns
 
       - name: Create CI entry file (main.py)
         run: |
@@ -69,17 +121,17 @@ jobs:
               sys.exit(app.exec())
           PY
 
-      # Windows 平台：按要求使用 --onedir + --windowed
+      # Windows 平台：按要求使用 -F（--onefile）+ --windowed
       - name: Build with PyInstaller on Windows
         if: runner.os == 'Windows'
         run: |
-          pyinstaller --onedir --windowed --name="墨筑博客工作台" main.py
+          pyinstaller -F --windowed --name="墨筑博客工作台" --icon="assets/icons/mozu.ico" --add-data "assets;assets" main.py
 
-      # macOS 平台：按要求使用 --windowed（输出 .app）
+      # macOS 平台：按要求使用 -F（--onefile）+ --windowed（输出 .app）
       - name: Build with PyInstaller on macOS
         if: runner.os == 'macOS'
         run: |
-          pyinstaller --windowed --name="墨筑博客工作台" main.py
+          pyinstaller -F --windowed --name="墨筑博客工作台" --icon="assets/icons/mozu.icns" --add-data "assets:assets" main.py
 
       # Windows 压缩：使用 PowerShell Compress-Archive
       - name: Package Windows build
@@ -87,7 +139,7 @@ jobs:
         shell: pwsh
         working-directory: .
         run: |
-          Compress-Archive -Path "dist/墨筑博客工作台" -DestinationPath "${{ matrix.zip_name }}" -Force
+          Compress-Archive -Path "dist/墨筑博客工作台.exe" -DestinationPath "${{ matrix.zip_name }}" -Force
 
       # macOS 压缩：使用 zip -r 打包 .app
       - name: Package macOS build

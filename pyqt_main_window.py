@@ -229,6 +229,14 @@ def get_settings_file_path() -> Path:
 SETTINGS_FILE = get_settings_file_path()
 
 
+def get_resource_base_path() -> Path:
+    # PyInstaller onefile 解包后会将资源放在 _MEIPASS 目录。
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return Path(meipass)
+    return Path(__file__).resolve().parent
+
+
 class RepoCommitConfigDialog(QDialog):
     def __init__(
         self,
@@ -305,7 +313,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"{__appname__} 博客工具 v{__version__}")
         # 设置应用图标
-        icon_path = str(Path(__file__).resolve().parent / "assets" / "icons" / "mozu.svg")
+        icon_path = str(get_resource_base_path() / "assets" / "icons" / "mozu.svg")
         self.setWindowIcon(QIcon(icon_path))
         self.resize(1200, 760)
         self.last_docx_path: str | None = None
@@ -794,7 +802,7 @@ class MainWindow(QMainWindow):
         fallback_icon: QStyle.StandardPixmap,
     ) -> QIcon:
         icon_path = (
-            Path(__file__).resolve().parent
+            get_resource_base_path()
             / "assets"
             / "icons"
             / "theme"
