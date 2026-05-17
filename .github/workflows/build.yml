@@ -59,7 +59,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install pyqt6 gitpython mammoth html2text pyinstaller pillow
+          pip install -r requirements.txt pyinstaller pillow
 
       - name: Generate app icon assets from SVG
         if: runner.os != 'Linux'
