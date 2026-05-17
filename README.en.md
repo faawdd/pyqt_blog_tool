@@ -9,7 +9,7 @@
 <p><img src="assets/icons/mozu.svg" alt="MoZu Icon" width="120"></p>
 
 <p>
-	<img src="https://img.shields.io/badge/version-1.0-0f766e" alt="Version">
+	<img src="https://img.shields.io/badge/version-1.0.7-0f766e" alt="Version">
 	<img src="https://img.shields.io/badge/python-3.11+-2563eb" alt="Python">
 	<img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-475569" alt="Platform">
 	<img src="https://img.shields.io/badge/license-MIT-16a34a" alt="License">
@@ -91,7 +91,7 @@ This repository includes a GitHub Actions workflow:
 
 ## Version
 
-- Current: 1.0
+- Current: 1.0.7
 - Product Name: MoZu (墨筑)
 
 ## Roadmap

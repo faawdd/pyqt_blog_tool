@@ -9,7 +9,7 @@
 <p><img src="assets/icons/mozu.svg" alt="墨筑图标" width="120"></p>
 
 <p>
-	<img src="https://img.shields.io/badge/version-1.0-0f766e" alt="版本">
+	<img src="https://img.shields.io/badge/version-1.0.7-0f766e" alt="版本">
 	<img src="https://img.shields.io/badge/python-3.11+-2563eb" alt="Python">
 	<img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-475569" alt="平台">
 	<img src="https://img.shields.io/badge/license-MIT-16a34a" alt="协议">
@@ -91,7 +91,7 @@ python pyqt_main_window.py
 
 ## 版本信息
 
-- 当前版本：1.0
+- 当前版本：1.0.7
 - 产品名称：墨筑 (MoZu)
 
 ## 路线图

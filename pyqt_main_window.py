@@ -453,7 +453,7 @@ class ElidedLabel(QLabel):
 
 # 应用信息
 __appname__ = "墨筑 (MoZu)"
-__version__ = "1.0"
+__version__ = "1.0.7"
 
 POSTS_RELATIVE_DIR = Path("content/post")
 POSTS_RELATIVE_DIR_CANDIDATES = [Path("content/post"), Path("content/posts")]
@@ -949,15 +949,6 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(8, 8, 8, 8)
         left_layout.setSpacing(8)
-
-        # 软件名称标签
-        app_title = QLabel(f"{__appname__} 博客工具 v{__version__}", left_panel)
-        font = app_title.font()
-        font.setPointSize(16)
-        font.setBold(True)
-        app_title.setFont(font)
-        app_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        left_layout.addWidget(app_title)
 
         left_header_layout = QHBoxLayout()
         self.sync_repo_button = QPushButton("同步仓库", left_panel)
@@ -2570,17 +2561,51 @@ class MainWindow(QMainWindow):
         preview_font_family = font_families[0] if font_families else "sans-serif"
         preview_font_family = preview_font_family.replace("'", "\\'")
         preview_font_size = max(12, int(editor_font.pointSizeF() or 14))
+        theme = detect_system_theme()
+
+        if theme == "dark":
+            preview_text_color = "#e5e7eb"
+            preview_table_border = "#4b5563"
+            preview_table_header_bg = "#1f2937"
+            preview_table_cell_bg = "#111827"
+        else:
+            preview_text_color = "#1f2937"
+            preview_table_border = "#cbd5e1"
+            preview_table_header_bg = "#f8fafc"
+            preview_table_cell_bg = "#ffffff"
+
+        preview_css = (
+            "body {"
+            f"font-family: '{preview_font_family}';"
+            f"font-size: {preview_font_size}px;"
+            "line-height: 1.58;"
+            "padding: 15px 18px;"
+            "margin: 0;"
+            f"color: {preview_text_color};"
+            "}"
+            "p { margin: 0 0 10px 0; }"
+            "table {"
+            "border-collapse: collapse;"
+            "border-spacing: 0;"
+            "width: 100%;"
+            "margin: 10px 0 14px 0;"
+            f"border: 1px solid {preview_table_border};"
+            "}"
+            "th, td {"
+            f"border: 1px solid {preview_table_border};"
+            "padding: 8px 10px;"
+            "text-align: left;"
+            "vertical-align: top;"
+            "}"
+            f"th {{ background: {preview_table_header_bg}; font-weight: 700; }}"
+            f"td {{ background: {preview_table_cell_bg}; }}"
+            "thead, tbody, tr { border-color: inherit; }"
+        )
 
         return (
-            "<html><head><meta charset='utf-8'></head><body "
-            "style='font-family: "
-            + "'"
-            + preview_font_family
-            + "'"
-            + "; font-size: "
-            + str(preview_font_size)
-            + "px; line-height: 1.58; padding: 15px 18px; margin: 0;'>"
-            "<style>p { margin: 0 0 10px 0; }</style>"
+            "<html><head><meta charset='utf-8'><style>"
+            + preview_css
+            + "</style></head><body>"
             + rendered_html
             + "</body></html>"
         )
