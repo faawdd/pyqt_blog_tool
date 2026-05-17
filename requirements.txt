@@ -2,3 +2,4 @@ PyQt6
 mammoth
 html2text
 GitPython
+markdown

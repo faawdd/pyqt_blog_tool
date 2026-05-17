@@ -2,9 +2,13 @@ import sys
 from pathlib import Path
 import re
 import json
+import html
+import random
 from datetime import datetime
 
-from PyQt6.QtCore import QEvent, QSize, Qt, QTimer, QStandardPaths
+import markdown as markdown_lib
+
+from PyQt6.QtCore import QEvent, QSize, Qt, QTimer, QStandardPaths, QRegularExpression, QRect
 from PyQt6.QtGui import (
     QAction,
     QColor,
@@ -14,6 +18,7 @@ from PyQt6.QtGui import (
     QPainter,
     QResizeEvent,
     QSyntaxHighlighter,
+    QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
 )
@@ -47,203 +52,379 @@ from PyQt6.QtWidgets import (
     QToolBar,
     QVBoxLayout,
     QWidget,
+    QPlainTextEdit,
 )
 
-from docx_converter import convert_docx_to_html_and_markdown, html_to_markdown
+from docx_converter import convert_docx_to_html_and_markdown
 from git_publish import GitPushThread, RepoSyncThread, build_front_matter
 from git import Repo
+from PyQt6.QtWidgets import QScrollBar
 
 
 class MarkdownHighlighter(QSyntaxHighlighter):
-    """Markdown 语法高亮器，应用于 Markdown 预览面板。"""
+    """Markdown 语法高亮器，应用于纯文本 Markdown 编辑器。"""
 
-    # 多行状态常量
     _STATE_NORMAL = 0
     _STATE_FRONT_MATTER = 1
     _STATE_CODE_FENCE = 2
-    _STATE_MATH_BLOCK = 3
 
     def __init__(self, document, theme: str = "light") -> None:
         super().__init__(document)
-        self._single_rules: list[tuple[re.Pattern, QTextCharFormat]] = []
         self.theme = theme
-        self._setup_rules()
+        self._setup_formats()
+        self._setup_patterns()
 
-    @staticmethod
-    def _fmt(
-        color: str,
-        bold: bool = False,
-        italic: bool = False,
-        bg: str | None = None,
-    ) -> QTextCharFormat:
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor(color))
-        if bold:
+    def _setup_formats(self) -> None:
+        if self.theme == "dark":
+            self.header_color = QColor("#5EA2FF")
+            self.bold_color = QColor("#E5E7EB")
+            self.italic_color = QColor("#C7D2FE")
+            self.inline_code_fg = QColor("#FFAB91")
+            self.inline_code_bg = QColor("#2A2E35")
+            self.code_fence_fg = QColor("#90A4AE")
+            self.code_fence_bg = QColor("#20252B")
+            self.link_fg = QColor("#80CBC4")
+            self.url_fg = QColor("#B39DDB")
+            self.front_matter_fg = QColor("#BCAAA4")
+            self.front_matter_key_fg = QColor("#D7CCC8")
+            self.quote_fg = QColor("#90A4AE")
+            self.list_marker_fg = QColor("#4FC3F7")
+            self.task_marker_fg = QColor("#FFCC80")
+            self.table_fg = QColor("#B0BEC5")
+            self.table_sep_fg = QColor("#80CBC4")
+            self.footnote_marker_fg = QColor("#F48FB1")
+            self.footnote_def_fg = QColor("#CE93D8")
+        else:
+            self.header_color = QColor("#2979FF")
+            self.bold_color = QColor("#1F2937")
+            self.italic_color = QColor("#374151")
+            self.inline_code_fg = QColor("#E64A19")
+            self.inline_code_bg = QColor("#F3F4F6")
+            self.code_fence_fg = QColor("#607D8B")
+            self.code_fence_bg = QColor("#F8FAFC")
+            self.link_fg = QColor("#2E7D32")
+            self.url_fg = QColor("#7E57C2")
+            self.front_matter_fg = QColor("#8D6E63")
+            self.front_matter_key_fg = QColor("#6D4C41")
+            self.quote_fg = QColor("#607D8B")
+            self.list_marker_fg = QColor("#1565C0")
+            self.task_marker_fg = QColor("#EF6C00")
+            self.table_fg = QColor("#546E7A")
+            self.table_sep_fg = QColor("#00897B")
+            self.footnote_marker_fg = QColor("#C2185B")
+            self.footnote_def_fg = QColor("#7B1FA2")
+
+        self.header_formats: dict[int, QTextCharFormat] = {}
+        for level in range(1, 7):
+            fmt = QTextCharFormat()
+            fmt.setForeground(self.header_color)
             fmt.setFontWeight(QFont.Weight.Bold)
-        if italic:
-            fmt.setFontItalic(True)
-        if bg:
-            fmt.setBackground(QColor(bg))
-        return fmt
+            fmt.setFontPointSize(max(10, 16 - level))
+            self.header_formats[level] = fmt
 
-    def _setup_rules(self) -> None:
-        f = self._fmt
-        
-        if self.theme == "dark":
-            # 暗色主题颜色
-            rules: list[tuple[re.Pattern, QTextCharFormat]] = [
-                # 标题 # 到 ######
-                (re.compile(r'^#{1,6}(?!#) .+'), f('#60a5fa', bold=True)),
-                # 加粗 **text** / __text__
-                (re.compile(r'\*\*[^*\n]+\*\*'), f('#c084fc', bold=True)),
-                (re.compile(r'__[^_\n]+__'), f('#c084fc', bold=True)),
-                # 斜体 *text* / _text_
-                (re.compile(r'(?<!\*)\*(?!\*)[^*\n]+(?<!\*)\*(?!\*)'), f('#22d3ee', italic=True)),
-                (re.compile(r'(?<!_)_(?!_)[^_\n]+(?<!_)_(?!_)'), f('#22d3ee', italic=True)),
-                # 行内代码 `code`
-                (re.compile(r'`[^`\n]+`'), f('#86efac', bg='#1e3a1f')),
-                # 行内公式 $...$
-                (re.compile(r'\$[^$\n]+\$'), f('#fbbf24', bg='#2d2413')),
-                # 引用块 > ...
-                (re.compile(r'^>.*'), f('#a0a0a0', italic=True)),
-                # 图片 ![alt](url)
-                (re.compile(r'!\[[^\]]*\]\([^)]+\)'), f('#2dd4bf')),
-                # 链接 [text](url)
-                (re.compile(r'\[[^\]]+\]\([^)]+\)'), f('#38bdf8')),
-                # 脚注 [^1]
-                (re.compile(r'\[\^[0-9a-zA-Z]+\]'), f('#f43f5e', bold=True, bg='#3f1621')),
-                # 任务列表
-                (re.compile(r'^[\s]*[-*]\s+\[[ xX]\]'), f('#f59e0b', bold=True)),
-                # 无序列表标记
-                (re.compile(r'^[\s]*[-*]\s'), f('#818cf8')),
-                # 有序列表标记
-                (re.compile(r'^[\s]*\d+\.\s'), f('#818cf8')),
-                # 表格分隔符
-                (re.compile(r'\|'), f('#64748b')),
-                # 分隔线
-                (re.compile(r'^-{3,}\s*$'), f('#78716c')),
-            ]
-        else:
-            # 亮色主题颜色
-            rules: list[tuple[re.Pattern, QTextCharFormat]] = [
-                # 标题 # 到 ######
-                (re.compile(r'^#{1,6}(?!#) .+'), f('#1d4ed8', bold=True)),
-                # 加粗 **text** / __text__
-                (re.compile(r'\*\*[^*\n]+\*\*'), f('#7c3aed', bold=True)),
-                (re.compile(r'__[^_\n]+__'), f('#7c3aed', bold=True)),
-                # 斜体 *text* / _text_
-                (re.compile(r'(?<!\*)\*(?!\*)[^*\n]+(?<!\*)\*(?!\*)'), f('#0891b2', italic=True)),
-                (re.compile(r'(?<!_)_(?!_)[^_\n]+(?<!_)_(?!_)'), f('#0891b2', italic=True)),
-                # 行内代码 `code`
-                (re.compile(r'`[^`\n]+`'), f('#059669', bg='#f0fdf4')),
-                # 行内公式 $...$
-                (re.compile(r'\$[^$\n]+\$'), f('#b45309', bg='#fffbeb')),
-                # 引用块 > ...
-                (re.compile(r'^>.*'), f('#78716c', italic=True)),
-                # 图片 ![alt](url)
-                (re.compile(r'!\[[^\]]*\]\([^)]+\)'), f('#0d9488')),
-                # 链接 [text](url)
-                (re.compile(r'\[[^\]]+\]\([^)]+\)'), f('#0369a1')),
-                # 脚注 [^1]
-                (re.compile(r'\[\^[0-9a-zA-Z]+\]'), f('#e11d48', bold=True, bg='#fdf2f8')),
-                # 任务列表
-                (re.compile(r'^[\s]*[-*]\s+\[[ xX]\]'), f('#d97706', bold=True)),
-                # 无序列表标记
-                (re.compile(r'^[\s]*[-*]\s'), f('#6366f1')),
-                # 有序列表标记
-                (re.compile(r'^[\s]*\d+\.\s'), f('#6366f1')),
-                # 表格分隔符
-                (re.compile(r'\|'), f('#64748b')),
-                # 分隔线
-                (re.compile(r'^-{3,}\s*$'), f('#94a3b8')),
-            ]
-        
-        self._single_rules = rules
+        self.bold_format = QTextCharFormat()
+        self.bold_format.setForeground(self.bold_color)
+        self.bold_format.setFontWeight(QFont.Weight.Bold)
 
-    def _get_theme_colors(self) -> dict[str, str]:
-        """返回当前主题的配色方案。"""
-        if self.theme == "dark":
-            return {
-                "front_matter": "#c084fc",
-                "front_matter_key": "#22d3ee",
-                "front_matter_text": "#a0a0a0",
-                "code_fence": "#86efac",
-                "code_fence_bg": "#1e3a1f",
-                "math_block": "#fbbf24",
-                "math_block_bg": "#2d2413",
-            }
-        else:
-            return {
-                "front_matter": "#c026d3",
-                "front_matter_key": "#0d9488",
-                "front_matter_text": "#6b7280",
-                "code_fence": "#059669",
-                "code_fence_bg": "#f0fdf4",
-                "math_block": "#b45309",
-                "math_block_bg": "#fffbeb",
-            }
+        self.italic_format = QTextCharFormat()
+        self.italic_format.setForeground(self.italic_color)
+        self.italic_format.setFontItalic(True)
+
+        self.inline_code_format = QTextCharFormat()
+        self.inline_code_format.setForeground(self.inline_code_fg)
+        self.inline_code_format.setBackground(self.inline_code_bg)
+        self.inline_code_format.setFontFamilies(["Consolas", "Courier New", "monospace"])
+
+        self.code_fence_format = QTextCharFormat()
+        self.code_fence_format.setForeground(self.code_fence_fg)
+        self.code_fence_format.setBackground(self.code_fence_bg)
+        self.code_fence_format.setFontFamilies(["Consolas", "Courier New", "monospace"])
+
+        self.link_format = QTextCharFormat()
+        self.link_format.setForeground(self.link_fg)
+
+        self.url_format = QTextCharFormat()
+        self.url_format.setForeground(self.url_fg)
+
+        self.front_matter_format = QTextCharFormat()
+        self.front_matter_format.setForeground(self.front_matter_fg)
+
+        self.front_matter_key_format = QTextCharFormat()
+        self.front_matter_key_format.setForeground(self.front_matter_key_fg)
+        self.front_matter_key_format.setFontWeight(QFont.Weight.Bold)
+
+        self.quote_format = QTextCharFormat()
+        self.quote_format.setForeground(self.quote_fg)
+        self.quote_format.setFontItalic(True)
+
+        self.list_marker_format = QTextCharFormat()
+        self.list_marker_format.setForeground(self.list_marker_fg)
+        self.list_marker_format.setFontWeight(QFont.Weight.Bold)
+
+        self.task_marker_format = QTextCharFormat()
+        self.task_marker_format.setForeground(self.task_marker_fg)
+        self.task_marker_format.setFontWeight(QFont.Weight.Bold)
+
+        self.table_format = QTextCharFormat()
+        self.table_format.setForeground(self.table_fg)
+
+        self.table_separator_format = QTextCharFormat()
+        self.table_separator_format.setForeground(self.table_sep_fg)
+        self.table_separator_format.setFontWeight(QFont.Weight.Bold)
+
+        self.footnote_marker_format = QTextCharFormat()
+        self.footnote_marker_format.setForeground(self.footnote_marker_fg)
+        self.footnote_marker_format.setFontWeight(QFont.Weight.Bold)
+
+        self.footnote_definition_format = QTextCharFormat()
+        self.footnote_definition_format.setForeground(self.footnote_def_fg)
+
+    def _setup_patterns(self) -> None:
+        self.front_matter_delim_re = QRegularExpression(r"^---\s*$")
+        self.front_matter_key_re = QRegularExpression(r"^([A-Za-z_][\w-]*)(\s*:)")
+        self.fence_re = QRegularExpression(r"^\s*```.*$")
+
+        self.header_re = QRegularExpression(r"^(#{1,6})\s+.+$")
+        self.bold_star_re = QRegularExpression(r"\*\*[^*\n]+\*\*")
+        self.bold_underscore_re = QRegularExpression(r"__[^_\n]+__")
+        self.italic_star_re = QRegularExpression(r"(?<!\*)\*(?!\*)[^*\n]+(?<!\*)\*(?!\*)")
+        self.italic_underscore_re = QRegularExpression(r"(?<!_)_(?!_)[^_\n]+(?<!_)_(?!_)")
+        self.inline_code_re = QRegularExpression(r"`[^`\n]+`")
+
+        self.image_re = QRegularExpression(r"!\[[^\]]*\]\(([^)]+)\)")
+        self.link_re = QRegularExpression(r"\[[^\]]+\]\(([^)]+)\)")
+
+        self.quote_re = QRegularExpression(r"^\s*>\s?.*$")
+        self.unordered_list_marker_re = QRegularExpression(r"^(\s*[-+*]\s+)")
+        self.ordered_list_marker_re = QRegularExpression(r"^(\s*\d+\.\s+)")
+        self.task_list_marker_re = QRegularExpression(r"^(\s*[-+*]\s+\[[ xX]\]\s+)")
+
+        self.table_row_re = QRegularExpression(r"^\s*\|.*\|\s*$")
+        self.table_separator_re = QRegularExpression(r"^\s*\|?(\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$")
+
+        self.footnote_marker_re = QRegularExpression(r"\[\^[A-Za-z0-9_-]+\]")
+        self.footnote_definition_re = QRegularExpression(r"^(\s*\[\^[A-Za-z0-9_-]+\]:)")
+
+    def _apply_pattern(
+        self,
+        text: str,
+        pattern: QRegularExpression,
+        fmt: QTextCharFormat,
+        capture_group: int | None = None,
+    ) -> None:
+        it = pattern.globalMatch(text)
+        while it.hasNext():
+            match = it.next()
+            if capture_group is None:
+                start = match.capturedStart()
+                length = match.capturedLength()
+            else:
+                start = match.capturedStart(capture_group)
+                length = match.capturedLength(capture_group)
+            if start >= 0 and length > 0:
+                self.setFormat(start, length, fmt)
+
+    def _highlight_front_matter_block(self, text: str) -> None:
+        self.setFormat(0, len(text), self.front_matter_format)
+        key_match = self.front_matter_key_re.match(text)
+        if key_match.hasMatch():
+            self.setFormat(
+                key_match.capturedStart(1),
+                key_match.capturedLength(1),
+                self.front_matter_key_format,
+            )
 
     def highlightBlock(self, text: str) -> None:  # type: ignore[override]
-        prev = self.previousBlockState()
-        block_num = self.currentBlock().blockNumber()
-        fm_delim = re.compile(r'^---\s*$')
-        fence_re = re.compile(r'^```')
-        math_re = re.compile(r'^\$\$')
-        
-        colors = self._get_theme_colors()
-        f = self._fmt
+        prev_state = self.previousBlockState()
+        self.setCurrentBlockState(self._STATE_NORMAL)
 
-        # ─── Front Matter（文件首个 --- 开头） ───
-        if block_num == 0 and fm_delim.match(text):
+        # Front Matter 仅在文档顶端开始，使用多行状态保证滚动和编辑稳定。
+        if self.currentBlock().blockNumber() == 0 and self.front_matter_delim_re.match(text).hasMatch():
+            self._highlight_front_matter_block(text)
             self.setCurrentBlockState(self._STATE_FRONT_MATTER)
-            self.setFormat(0, len(text), f(colors["front_matter"], bold=True))
             return
 
-        if prev == self._STATE_FRONT_MATTER:
-            if fm_delim.match(text):
+        if prev_state == self._STATE_FRONT_MATTER:
+            self._highlight_front_matter_block(text)
+            if self.front_matter_delim_re.match(text).hasMatch():
                 self.setCurrentBlockState(self._STATE_NORMAL)
-                self.setFormat(0, len(text), f(colors["front_matter"], bold=True))
             else:
                 self.setCurrentBlockState(self._STATE_FRONT_MATTER)
-                self.setFormat(0, len(text), f(colors["front_matter_text"]))
-                m = re.match(r'^([a-zA-Z_][\w]*)(\s*:)', text)
-                if m:
-                    self.setFormat(0, m.end(1), f(colors["front_matter_key"], bold=True))
             return
 
-        # ─── 代码块 ``` ───
-        if prev == self._STATE_CODE_FENCE:
-            self.setFormat(0, len(text), f(colors["code_fence"], bg=colors["code_fence_bg"]))
-            if fence_re.match(text):
+        # 围栏代码块高亮：进入/退出均使用 block state 跟踪。
+        if prev_state == self._STATE_CODE_FENCE:
+            self.setFormat(0, len(text), self.code_fence_format)
+            if self.fence_re.match(text).hasMatch():
                 self.setCurrentBlockState(self._STATE_NORMAL)
             else:
                 self.setCurrentBlockState(self._STATE_CODE_FENCE)
             return
 
-        if fence_re.match(text):
-            self.setFormat(0, len(text), f(colors["code_fence"], bg=colors["code_fence_bg"]))
+        if self.fence_re.match(text).hasMatch():
+            self.setFormat(0, len(text), self.code_fence_format)
             self.setCurrentBlockState(self._STATE_CODE_FENCE)
             return
 
-        # ─── 公式块 $$ ───
-        if prev == self._STATE_MATH_BLOCK:
-            self.setFormat(0, len(text), f(colors["math_block"], bg=colors["math_block_bg"]))
-            if math_re.match(text):
-                self.setCurrentBlockState(self._STATE_NORMAL)
-            else:
-                self.setCurrentBlockState(self._STATE_MATH_BLOCK)
-            return
+        header_match = self.header_re.match(text)
+        if header_match.hasMatch():
+            header_level = len(header_match.captured(1))
+            self.setFormat(0, len(text), self.header_formats.get(header_level, self.header_formats[6]))
 
-        if math_re.match(text):
-            self.setFormat(0, len(text), f(colors["math_block"], bg=colors["math_block_bg"]))
-            self.setCurrentBlockState(self._STATE_MATH_BLOCK)
-            return
+        if self.quote_re.match(text).hasMatch():
+            self.setFormat(0, len(text), self.quote_format)
 
-        # ─── 普通行：应用单行规则 ───
-        self.setCurrentBlockState(self._STATE_NORMAL)
-        for pattern, fmt in self._single_rules:
-            for m in pattern.finditer(text):
-                self.setFormat(m.start(), m.end() - m.start(), fmt)
+        if self.table_row_re.match(text).hasMatch():
+            self.setFormat(0, len(text), self.table_format)
+        if self.table_separator_re.match(text).hasMatch():
+            self.setFormat(0, len(text), self.table_separator_format)
+
+        self._apply_pattern(text, self.task_list_marker_re, self.task_marker_format, capture_group=1)
+        self._apply_pattern(text, self.unordered_list_marker_re, self.list_marker_format, capture_group=1)
+        self._apply_pattern(text, self.ordered_list_marker_re, self.list_marker_format, capture_group=1)
+
+        if self.footnote_definition_re.match(text).hasMatch():
+            self.setFormat(0, len(text), self.footnote_definition_format)
+            self._apply_pattern(text, self.footnote_definition_re, self.footnote_marker_format, capture_group=1)
+
+        self._apply_pattern(text, self.footnote_marker_re, self.footnote_marker_format)
+
+        self._apply_pattern(text, self.bold_star_re, self.bold_format)
+        self._apply_pattern(text, self.bold_underscore_re, self.bold_format)
+        self._apply_pattern(text, self.italic_star_re, self.italic_format)
+        self._apply_pattern(text, self.italic_underscore_re, self.italic_format)
+        self._apply_pattern(text, self.inline_code_re, self.inline_code_format)
+
+        self._apply_pattern(text, self.image_re, self.link_format)
+        self._apply_pattern(text, self.image_re, self.url_format, capture_group=1)
+        self._apply_pattern(text, self.link_re, self.link_format)
+        self._apply_pattern(text, self.link_re, self.url_format, capture_group=1)
+
+
+class LineNumberArea(QWidget):
+    """承载行号绘制的轻量部件，绘制逻辑委托给编辑器本体。"""
+
+    def __init__(self, editor: "MarkdownEditor") -> None:
+        super().__init__(editor)
+        self._editor = editor
+
+    def sizeHint(self):
+        return QSize(self._editor.lineNumberAreaWidth(), 0)
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        self._editor.lineNumberAreaPaintEvent(event)
+
+
+class MarkdownEditor(QPlainTextEdit):
+    """带左侧行号区域的 Markdown 编辑器。"""
+
+    def __init__(self, parent=None, theme: str = "light") -> None:
+        super().__init__(parent)
+        self._theme = theme
+        self._line_number_bg = QColor("#f5f5f5")
+        self._line_number_fg = QColor("#999999")
+        self._line_number_border = QColor("#d9d9d9")
+        self._set_line_number_palette(theme)
+
+        self.line_number_area = LineNumberArea(self)
+        self.blockCountChanged.connect(self.updateLineNumberAreaWidth)
+        self.updateRequest.connect(self.updateLineNumberArea)
+        self.cursorPositionChanged.connect(self._highlight_current_line_number)
+        self.updateLineNumberAreaWidth(0)
+
+    def _set_line_number_palette(self, theme: str) -> None:
+        if theme == "dark":
+            self._line_number_bg = QColor("#23262b")
+            self._line_number_fg = QColor("#8b949e")
+            self._line_number_border = QColor("#3a414a")
+        else:
+            self._line_number_bg = QColor("#f5f5f5")
+            self._line_number_fg = QColor("#999999")
+            self._line_number_border = QColor("#d9d9d9")
+
+    def setTheme(self, theme: str) -> None:
+        self._theme = theme
+        self._set_line_number_palette(theme)
+        self.line_number_area.update()
+
+    def lineNumberAreaWidth(self) -> int:
+        # 根据总逻辑行数动态计算行号区域宽度。
+        digits = len(str(max(1, self.blockCount())))
+        char_width = self.fontMetrics().horizontalAdvance("9")
+        left_padding = 6
+        right_padding = 8
+        return left_padding + (char_width * digits) + right_padding
+
+    def updateLineNumberAreaWidth(self, _new_block_count: int) -> None:
+        self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
+
+    def updateLineNumberArea(self, rect: QRect, dy: int) -> None:
+        if dy:
+            self.line_number_area.scroll(0, dy)
+        else:
+            self.line_number_area.update(0, rect.y(), self.line_number_area.width(), rect.height())
+
+        if rect.contains(self.viewport().rect()):
+            self.updateLineNumberAreaWidth(0)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        content_rect = self.contentsRect()
+        self.line_number_area.setGeometry(
+            QRect(
+                content_rect.left(),
+                content_rect.top(),
+                self.lineNumberAreaWidth(),
+                content_rect.height(),
+            )
+        )
+
+    def _highlight_current_line_number(self) -> None:
+        self.line_number_area.update()
+
+    def lineNumberAreaPaintEvent(self, event) -> None:
+        painter = QPainter(self.line_number_area)
+        painter.fillRect(event.rect(), self._line_number_bg)
+
+        block = self.firstVisibleBlock()
+        block_number = block.blockNumber()
+        top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
+        bottom = top + int(self.blockBoundingRect(block).height())
+
+        current_block = self.textCursor().blockNumber()
+        base_font = self.font()
+        number_font = QFont(base_font)
+        number_font.setPointSize(max(8, base_font.pointSize() - 1))
+        painter.setFont(number_font)
+
+        width = self.line_number_area.width()
+        text_right_padding = 6
+
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                number = str(block_number + 1)
+                if block_number == current_block:
+                    painter.setPen(self.palette().color(QPalette.ColorRole.Text))
+                else:
+                    painter.setPen(self._line_number_fg)
+
+                painter.drawText(
+                    0,
+                    top,
+                    width - text_right_padding,
+                    self.fontMetrics().height(),
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    number,
+                )
+
+            block = block.next()
+            block_number += 1
+            top = bottom
+            bottom = top + int(self.blockBoundingRect(block).height())
+
+        # 行号区与正文区之间的分界线。
+        painter.setPen(self._line_number_border)
+        painter.drawLine(width - 1, event.rect().top(), width - 1, event.rect().bottom())
 
 
 class ElidedLabel(QLabel):
@@ -392,6 +573,56 @@ class RepoCommitConfigDialog(QDialog):
         }
 
 
+class NewArticleDialog(QDialog):
+    def __init__(self, categories: list[str], parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("新建文章")
+        self.resize(520, 260)
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.file_name_input = QLineEdit(self)
+        self.file_name_input.setPlaceholderText("例如: my-new-post")
+        form.addRow("文章文件名", self.file_name_input)
+
+        self.title_input = QLineEdit(self)
+        self.title_input.setPlaceholderText("例如: 我的新文章")
+        form.addRow("文章标题", self.title_input)
+
+        self.category_combo = QComboBox(self)
+        self.category_combo.addItem("（请选择现有分类）")
+        for category in categories:
+            self.category_combo.addItem(category)
+        form.addRow("分类选择", self.category_combo)
+
+        self.new_category_input = QLineEdit(self)
+        self.new_category_input.setPlaceholderText("可选：输入新分类，优先级高于下拉选择")
+        form.addRow("新建分类", self.new_category_input)
+
+        layout.addLayout(form)
+
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            self,
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def values(self) -> dict[str, str]:
+        selected_category = self.category_combo.currentText().strip()
+        if selected_category.startswith("（"):
+            selected_category = ""
+
+        return {
+            "file_name": self.file_name_input.text().strip(),
+            "title": self.title_input.text().strip(),
+            "selected_category": selected_category,
+            "new_category": self.new_category_input.text().strip(),
+        }
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -409,11 +640,13 @@ class MainWindow(QMainWindow):
         self.current_article_path: Path | None = None
         self.current_front_matter = ""
         self.article_records: list[Path] = []
+        self.existing_categories: list[str] = []
         self._metadata_updating = False
         self._compact_mode = False
         self._compact_actions: list[QAction] = []
         self._compact_widgets: list[QWidget] = []
         self._compact_measure_in_progress = False
+        self._typography_updating = False
 
         self.local_repo_path = ""
         self.remote_repo_url = ""
@@ -501,11 +734,25 @@ class MainWindow(QMainWindow):
         if not repo_path:
             return []
 
-        posts_dir = self._configured_posts_dir(show_warning=False)
-        if posts_dir and posts_dir.exists():
-            files = [p for p in posts_dir.rglob("*.md") if p.name != "_index.md"]
-            if files:
-                return sorted(files, key=lambda p: p.name.lower())
+        repo_base = Path(repo_path)
+        files: list[Path] = []
+        seen_paths: set[Path] = set()
+
+        for relative_dir in POSTS_RELATIVE_DIR_CANDIDATES:
+            candidate = repo_base / relative_dir
+            if not (candidate.exists() and candidate.is_dir()):
+                continue
+            for md_file in candidate.rglob("*.md"):
+                if md_file.name == "_index.md":
+                    continue
+                resolved = md_file.resolve()
+                if resolved in seen_paths:
+                    continue
+                seen_paths.add(resolved)
+                files.append(md_file)
+
+        if files:
+            return sorted(files, key=lambda p: p.name.lower())
 
         # 回退策略：当仓库结构不含 content/post(s) 时，扫描 content 下全部文章。
         content_dir = Path(repo_path) / "content"
@@ -514,6 +761,167 @@ class MainWindow(QMainWindow):
 
         files = [p for p in content_dir.rglob("*.md") if p.name != "_index.md"]
         return sorted(files, key=lambda p: p.name.lower())
+
+    def _preferred_new_post_dir(self) -> Path | None:
+        repo_path = self.local_repo_path.strip()
+        if not repo_path:
+            QMessageBox.warning(self, "未配置仓库", "请先点击“仓库设置”配置本地仓库路径。")
+            return None
+
+        target_dir = Path(repo_path) / "content" / "posts"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        return target_dir
+
+    def _categories_root_dir(self) -> Path | None:
+        repo_path = self.local_repo_path.strip()
+        if not repo_path:
+            return None
+        return Path(repo_path) / "content" / "categories"
+
+    @staticmethod
+    def _normalize_category_name(category: str) -> str:
+        normalized = category.strip()
+        # 防止路径穿透和多级目录注入，保持 Stack 分类目录结构稳定。
+        normalized = normalized.replace("/", "-").replace("\\", "-")
+        normalized = re.sub(r"\s+", " ", normalized)
+        return normalized.strip(".")
+
+    @staticmethod
+    def _stack_soft_color_palette() -> list[str]:
+        return [
+            "#2a9d8f",
+            "#457b9d",
+            "#6d597a",
+            "#8ab17d",
+            "#7f5539",
+            "#5e60ce",
+            "#4d908e",
+            "#577590",
+            "#3d5a80",
+            "#7b6d8d",
+        ]
+
+    def _random_stack_category_color(self) -> str:
+        return random.choice(self._stack_soft_color_palette())
+
+    def _scan_category_dirs(self) -> list[str]:
+        categories_root = self._categories_root_dir()
+        if not categories_root or not categories_root.exists():
+            return []
+
+        categories: list[str] = []
+        for child in categories_root.iterdir():
+            if child.is_dir() and not child.name.startswith("."):
+                categories.append(child.name)
+        return sorted(categories, key=lambda x: x.casefold())
+
+    def _ensure_stack_category_metadata(self, category_name: str) -> None:
+        normalized_name = self._normalize_category_name(category_name)
+        if not normalized_name:
+            return
+
+        categories_root = self._categories_root_dir()
+        if not categories_root:
+            return
+
+        category_dir = categories_root / normalized_name
+        category_dir.mkdir(parents=True, exist_ok=True)
+
+        index_path = category_dir / "_index.md"
+        if index_path.exists():
+            return
+
+        color = self._random_stack_category_color()
+        stack_index = (
+            "---\n"
+            f'title: "{normalized_name}"\n'
+            "description: \"通过墨筑博客客户端自动创建的分类描述\"\n"
+            "image: \"\"\n"
+            "style:\n"
+            f'    background: "{color}"\n'
+            "    color: \"#fff\"\n"
+            "---\n"
+        )
+        index_path.write_text(stack_index, encoding="utf-8")
+
+    @staticmethod
+    def _clean_front_matter_value(raw_value: str) -> str:
+        return raw_value.strip().strip('"').strip("'")
+
+    def _extract_categories_from_front_matter(self, front_matter: str) -> list[str]:
+        categories: list[str] = []
+
+        inline_match = re.search(r"(?m)^categories:\s*\[(.*?)\]\s*$", front_matter)
+        if inline_match:
+            for part in inline_match.group(1).split(","):
+                cleaned = self._clean_front_matter_value(part)
+                if cleaned:
+                    categories.append(cleaned)
+
+        scalar_match = re.search(r"(?m)^categories:\s*([^\n\[][^\n]*)$", front_matter)
+        if scalar_match:
+            cleaned = self._clean_front_matter_value(scalar_match.group(1))
+            if cleaned:
+                categories.append(cleaned)
+
+        list_header = re.search(r"(?m)^categories:\s*$", front_matter)
+        if list_header:
+            tail_lines = front_matter[list_header.end() :].splitlines()
+            for line in tail_lines:
+                line_strip = line.strip()
+                if not line_strip:
+                    continue
+                item_match = re.match(r"^\s*-\s+(.+?)\s*$", line)
+                if item_match:
+                    cleaned = self._clean_front_matter_value(item_match.group(1))
+                    if cleaned:
+                        categories.append(cleaned)
+                    continue
+                if re.match(r"^[A-Za-z_][\w-]*\s*:", line_strip):
+                    break
+                if not line.startswith((" ", "\t")):
+                    break
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for category in categories:
+            key = category.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(category)
+        return deduped
+
+    def scan_existing_categories(self) -> list[str]:
+        category_set: dict[str, str] = {}
+
+        # Stack 主题优先从 content/categories 目录名读取分类。
+        for category in self._scan_category_dirs():
+            normalized = self._normalize_category_name(category)
+            if not normalized:
+                continue
+            category_set[normalized.casefold()] = normalized
+
+        for article_path in self._collect_article_files():
+            try:
+                raw_markdown = article_path.read_text(encoding="utf-8")
+            except Exception:
+                continue
+
+            front_matter, _ = self._split_front_matter(raw_markdown)
+            if not front_matter.strip():
+                continue
+
+            for category in self._extract_categories_from_front_matter(front_matter):
+                normalized = self._normalize_category_name(category)
+                if not normalized:
+                    continue
+                key = normalized.casefold()
+                if key not in category_set:
+                    category_set[key] = normalized
+
+        self.existing_categories = sorted(category_set.values(), key=lambda x: x.casefold())
+        return self.existing_categories
 
     def _ensure_git_identity(self) -> None:
         repo_path = self.local_repo_path.strip()
@@ -626,14 +1034,19 @@ class MainWindow(QMainWindow):
         meta_form.addRow("", self.fm_apply_button)
         left_layout.addWidget(meta_group)
 
-        self.rich_editor = QTextEdit(self)
-        self.rich_editor.setPlaceholderText("在这里编写富文本内容，或导入 Word 内容...")
-        self.rich_editor.textChanged.connect(self.on_rich_text_changed)
+        self.markdown_editor = MarkdownEditor(self, detect_system_theme())
+        self.markdown_editor.setObjectName("markdownEditor")
+        self.markdown_editor.setPlaceholderText("在这里直接编写 Markdown 源码...")
+        self.markdown_editor.textChanged.connect(self.on_markdown_text_changed)
+        self.editor_highlighter = MarkdownHighlighter(
+            self.markdown_editor.document(),
+            detect_system_theme(),
+        )
 
         self.md_preview = QTextEdit(self)
-        self.md_preview.setPlaceholderText("这里实时预览 Markdown 源码...")
+        self.md_preview.setPlaceholderText("这里实时预览渲染后的 HTML...")
         self.md_preview.setReadOnly(True)
-        self._md_highlighter = MarkdownHighlighter(self.md_preview.document(), detect_system_theme())
+        self._apply_editor_typography(use_preferred_font=True)
 
         # 同步滚动
         self._scroll_guard = False
@@ -641,19 +1054,14 @@ class MainWindow(QMainWindow):
         def _sync_scroll_to_preview(value: int) -> None:
             if self._scroll_guard:
                 return
-            preview_bar = self.md_preview.verticalScrollBar()
-            editor_bar = self.rich_editor.verticalScrollBar()
-            if editor_bar.maximum() == 0:
-                return
-            ratio = value / editor_bar.maximum()
-            self._scroll_guard = True
-            preview_bar.setValue(int(ratio * preview_bar.maximum()))
-            self._scroll_guard = False
+            editor_bar = self.markdown_editor.verticalScrollBar()
+            ratio = self._scroll_ratio(editor_bar)
+            self._restore_preview_scroll(ratio)
 
         def _sync_scroll_to_editor(value: int) -> None:
             if self._scroll_guard:
                 return
-            editor_bar = self.rich_editor.verticalScrollBar()
+            editor_bar = self.markdown_editor.verticalScrollBar()
             preview_bar = self.md_preview.verticalScrollBar()
             if preview_bar.maximum() == 0:
                 return
@@ -662,13 +1070,15 @@ class MainWindow(QMainWindow):
             editor_bar.setValue(int(ratio * editor_bar.maximum()))
             self._scroll_guard = False
 
-        self.rich_editor.verticalScrollBar().valueChanged.connect(_sync_scroll_to_preview)
+        self.markdown_editor.verticalScrollBar().valueChanged.connect(_sync_scroll_to_preview)
+        self.markdown_editor.cursorPositionChanged.connect(self._schedule_preview_scroll_sync)
         self.md_preview.verticalScrollBar().valueChanged.connect(_sync_scroll_to_editor)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(left_panel)
-        splitter.addWidget(self.rich_editor)
+        splitter.addWidget(self.markdown_editor)
         splitter.addWidget(self.md_preview)
+        self.main_splitter = splitter
         splitter.setSizes([280, 560, 560])
         splitter.setStretchFactor(0, 0)  # 左侧栏：不随窗口拉伸
         splitter.setStretchFactor(1, 1)  # 编辑区：按比例伸缩
@@ -847,7 +1257,7 @@ class MainWindow(QMainWindow):
         self.font_family_combo.setMaximumWidth(190)
         self.font_family_combo.setFixedHeight(toolbar_control_height)
         self.font_family_combo.setToolTip("选择字体")
-        self.font_family_combo.setCurrentFont(self.rich_editor.font())
+        self.font_family_combo.setCurrentFont(self.markdown_editor.font())
         self.font_family_combo.currentFontChanged.connect(self.on_font_family_changed)
         font_controls_layout.addWidget(self.font_family_combo)
 
@@ -855,7 +1265,7 @@ class MainWindow(QMainWindow):
         self.font_size_spin.setRange(8, 72)
         self.font_size_spin.setFixedWidth(70)
         self.font_size_spin.setFixedHeight(toolbar_control_height)
-        self.font_size_spin.setValue(max(8, int(self.rich_editor.fontPointSize() or 12)))
+        self.font_size_spin.setValue(max(8, int(self.markdown_editor.font().pointSize() or 12)))
         self.font_size_spin.setToolTip("选择字号")
         self.font_size_spin.valueChanged.connect(self.on_font_size_changed)
         font_controls_layout.addWidget(self.font_size_spin)
@@ -916,6 +1326,22 @@ class MainWindow(QMainWindow):
         self._hover_icon_map[self.more_menu_button] = (more_normal_icon, more_hover_icon)
         self.more_menu_button.setVisible(False)
         toolbar.addWidget(self.more_menu_button)
+
+        right_spacer = QWidget(self)
+        right_spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(right_spacer)
+        self.toolbar_right_spacer = right_spacer
+
+        self.preview_toggle_action = add_icon_action(
+            "预览开关",
+            "显示/隐藏右侧预览",
+            "preview-toggle.svg",
+            QStyle.StandardPixmap.SP_FileDialogDetailedView,
+            self.on_toggle_preview,
+        )
+        self.preview_toggle_action.setCheckable(True)
+        self.preview_toggle_action.setChecked(True)
+
         self._rebuild_compact_menu()
         QTimer.singleShot(0, self._apply_narrow_window_strategy)
 
@@ -1042,6 +1468,97 @@ class MainWindow(QMainWindow):
         status_bar = QStatusBar(self)
         self.setStatusBar(status_bar)
         self.statusBar().showMessage("准备就绪")
+
+    def _scroll_ratio(self, scroll_bar: QScrollBar) -> float:
+        maximum = scroll_bar.maximum()
+        if maximum <= 0:
+            return 0.0
+        return scroll_bar.value() / maximum
+
+    def _set_scroll_by_ratio(self, scroll_bar: QScrollBar, ratio: float) -> None:
+        clamped_ratio = max(0.0, min(1.0, ratio))
+        scroll_bar.setValue(int(clamped_ratio * max(0, scroll_bar.maximum())))
+
+    def _editor_view_ratio(self) -> float:
+        if not hasattr(self, "markdown_editor"):
+            return 0.0
+
+        block_count = max(1, self.markdown_editor.document().blockCount() - 1)
+        first_visible_block = self.markdown_editor.firstVisibleBlock().blockNumber()
+        cursor_block = self.markdown_editor.textCursor().blockNumber()
+
+        # 视口位置和光标位置混合，保证“正在编辑处”与预览尽量一致。
+        blended_block = (first_visible_block * 0.7) + (cursor_block * 0.3)
+        return max(0.0, min(1.0, blended_block / block_count))
+
+    def _editor_scroll_ratio(self) -> float:
+        if not hasattr(self, "markdown_editor"):
+            return 0.0
+        return self._scroll_ratio(self.markdown_editor.verticalScrollBar())
+
+    def _sync_preview_to_editor_position(self) -> None:
+        self._restore_preview_scroll(self._editor_view_ratio())
+
+    def _schedule_preview_scroll_sync(self) -> None:
+        QTimer.singleShot(0, self._sync_preview_to_editor_position)
+
+    def _restore_preview_scroll(self, ratio: float) -> None:
+        if not hasattr(self, "md_preview"):
+            return
+
+        preview_bar = self.md_preview.verticalScrollBar()
+        self._scroll_guard = True
+        try:
+            self._set_scroll_by_ratio(preview_bar, ratio)
+        finally:
+            self._scroll_guard = False
+
+    def _preferred_editor_font(self) -> QFont:
+        font = QFont()
+        if sys.platform.startswith("win"):
+            font.setFamilies(["Consolas", "Microsoft YaHei", "Segoe UI"])
+        elif sys.platform == "darwin":
+            font.setFamilies(["Menlo", "PingFang SC", "Helvetica Neue"])
+        else:
+            font.setFamilies(["Consolas", "Noto Sans CJK SC", "DejaVu Sans Mono"])
+        font.setPointSize(14)
+        return font
+
+    def _apply_editor_typography(self, use_preferred_font: bool = False) -> None:
+        if self._typography_updating:
+            return
+        if not hasattr(self, "markdown_editor"):
+            return
+        if not hasattr(self, "md_preview"):
+            return
+
+        self._typography_updating = True
+        try:
+            if use_preferred_font:
+                font = self._preferred_editor_font()
+                self.markdown_editor.setFont(font)
+                self.md_preview.setFont(font)
+
+            # 4 空格缩进的可视宽度，更适合 Markdown 编辑体验。
+            self.markdown_editor.setTabStopDistance(
+                self.markdown_editor.fontMetrics().horizontalAdvance(" ") * 4
+            )
+
+            # 通过块格式统一设置行高和段间距。
+            block_format = QTextBlockFormat()
+            block_format.setLineHeight(
+                158,
+                QTextBlockFormat.LineHeightTypes.ProportionalHeight.value,
+            )
+            block_format.setBottomMargin(10.0)
+
+            cursor = QTextCursor(self.markdown_editor.document())
+            cursor.beginEditBlock()
+            cursor.select(QTextCursor.SelectionType.Document)
+            cursor.mergeBlockFormat(block_format)
+            cursor.endEditBlock()
+        finally:
+            self._typography_updating = False
 
     def _get_stylesheet(self, theme: str) -> str:
         """返回指定主题的样式表。"""
@@ -1228,13 +1745,16 @@ class MainWindow(QMainWindow):
                 background: #5d7dd9;
                 color: #ffffff;
             }
-            QTextEdit {
+            QTextEdit, QPlainTextEdit {
                 background: #2d2d2d;
                 color: #e0e0e0;
                 border: 1px solid #4d4d4d;
                 border-radius: 6px;
                 padding: 8px;
                 selection-background-color: #5d7dd9;
+            }
+            QPlainTextEdit#markdownEditor {
+                padding: 15px 18px 15px 18px;
             }
             QStatusBar {
                 background: #2d2d2d;
@@ -1418,13 +1938,16 @@ class MainWindow(QMainWindow):
                 background: #dbeafe;
                 color: #1f2937;
             }
-            QTextEdit {
+            QTextEdit, QPlainTextEdit {
                 background: #ffffff;
                 color: #1f2937;
                 border: 1px solid #d1d5db;
                 border-radius: 6px;
                 padding: 8px;
                 selection-background-color: #c7d2fe;
+            }
+            QPlainTextEdit#markdownEditor {
+                padding: 15px 18px 15px 18px;
             }
             QStatusBar {
                 background: #ffffff;
@@ -1446,28 +1969,24 @@ class MainWindow(QMainWindow):
         """根据系统主题自动应用相应样式。"""
         theme = detect_system_theme()
         self.setStyleSheet(self._get_stylesheet(theme))
-
-    def _merge_format_on_selection(self, text_format: QTextCharFormat) -> None:
-        cursor = self.rich_editor.textCursor()
-        if not cursor.hasSelection():
-            cursor.select(QTextCursor.SelectionType.WordUnderCursor)
-        cursor.mergeCharFormat(text_format)
-        self.rich_editor.mergeCurrentCharFormat(text_format)
+        if hasattr(self, "markdown_editor") and isinstance(self.markdown_editor, MarkdownEditor):
+            self.markdown_editor.setTheme(theme)
 
     def _insert_text_at_cursor(self, text: str) -> None:
-        cursor = self.rich_editor.textCursor()
+        cursor = self.markdown_editor.textCursor()
         cursor.insertText(text)
-        self.rich_editor.setTextCursor(cursor)
+        self.markdown_editor.setTextCursor(cursor)
 
     def _apply_editor_font(self, family: str | None = None, point_size: int | None = None) -> None:
-        base_font = self.rich_editor.font()
+        base_font = self.markdown_editor.font()
         if family:
             base_font.setFamily(family)
         if point_size is not None:
             base_font.setPointSize(point_size)
 
-        self.rich_editor.setFont(base_font)
+        self.markdown_editor.setFont(base_font)
         self.md_preview.setFont(base_font)
+        self._apply_editor_typography(use_preferred_font=False)
 
     def on_font_family_changed(self, font: QFont) -> None:
         self._apply_editor_font(family=font.family())
@@ -1482,22 +2001,34 @@ class MainWindow(QMainWindow):
         return datetime.now().astimezone().isoformat(timespec="seconds")
 
     def on_bold(self) -> None:
-        current_weight = self.rich_editor.fontWeight()
-        target_weight = (
-            QFont.Weight.Normal
-            if current_weight == QFont.Weight.Bold
-            else QFont.Weight.Bold
-        )
-        fmt = QTextCharFormat()
-        fmt.setFontWeight(target_weight)
-        self._merge_format_on_selection(fmt)
-        self.statusBar().showMessage("已应用加粗样式", 2000)
+        cursor = self.markdown_editor.textCursor()
+        if cursor.hasSelection():
+            selected_text = cursor.selectedText().replace("\u2029", "\n")
+            cursor.insertText(f"**{selected_text}**")
+            self.markdown_editor.setTextCursor(cursor)
+            self.statusBar().showMessage("已包裹为加粗 Markdown", 2000)
+            return
+
+        insert_pos = cursor.position()
+        cursor.insertText("****")
+        cursor.setPosition(insert_pos + 2)
+        self.markdown_editor.setTextCursor(cursor)
+        self.statusBar().showMessage("已插入加粗占位符", 2000)
 
     def on_italic(self) -> None:
-        fmt = QTextCharFormat()
-        fmt.setFontItalic(not self.rich_editor.fontItalic())
-        self._merge_format_on_selection(fmt)
-        self.statusBar().showMessage("已应用倾斜样式", 2000)
+        cursor = self.markdown_editor.textCursor()
+        if cursor.hasSelection():
+            selected_text = cursor.selectedText().replace("\u2029", "\n")
+            cursor.insertText(f"*{selected_text}*")
+            self.markdown_editor.setTextCursor(cursor)
+            self.statusBar().showMessage("已包裹为斜体 Markdown", 2000)
+            return
+
+        insert_pos = cursor.position()
+        cursor.insertText("**")
+        cursor.setPosition(insert_pos + 1)
+        self.markdown_editor.setTextCursor(cursor)
+        self.statusBar().showMessage("已插入斜体占位符", 2000)
 
     def on_insert_image(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1510,33 +2041,35 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("已取消插入图片", 2000)
             return
 
-        self.rich_editor.insertHtml(f'<img src="{file_path}" alt="image" />')
+        image_name = Path(file_path).name
+        self._insert_text_at_cursor(f"![{image_name}]({file_path})")
         self.statusBar().showMessage("已插入图片", 2000)
 
     def on_insert_front_matter(self) -> None:
-        # Avoid duplicating front matter when users click the template button repeatedly.
-        if self.current_front_matter.strip():
-            QMessageBox.information(self, "提示", "文档顶部已存在 Front Matter。")
-            return
-
         default_title = ""
         if self.current_article_path:
             default_title = self.current_article_path.stem
 
-        self.current_front_matter = build_front_matter(
+        front_matter = build_front_matter(
             title=default_title or "",
             tags=[],
             categories=[],
             draft=False,
             date_iso=self._current_iso_datetime(),
         )
+
+        cursor = QTextCursor(self.markdown_editor.document())
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        cursor.insertText(front_matter)
+        self.markdown_editor.setTextCursor(cursor)
+
         self._metadata_updating = True
         self.fm_title_input.setText(default_title)
         self.fm_tags_input.setText("")
         self.fm_categories_input.setText("")
         self.fm_draft_checkbox.setChecked(False)
         self._metadata_updating = False
-        self.on_rich_text_changed()
+        self.on_markdown_text_changed()
         self.statusBar().showMessage("已插入 Front Matter 模板", 2500)
 
     def on_insert_footnote(self) -> None:
@@ -1546,17 +2079,17 @@ class MainWindow(QMainWindow):
 
         index = self._next_available_footnote_index()
 
-        cursor = self.rich_editor.textCursor()
+        cursor = self.markdown_editor.textCursor()
         cursor.insertText(f"[^{index}]")
 
-        end_cursor = self.rich_editor.textCursor()
+        end_cursor = self.markdown_editor.textCursor()
         end_cursor.movePosition(QTextCursor.MoveOperation.End)
         end_cursor.insertText(f"\n[^{index}]: {note_text}\n")
 
         self.statusBar().showMessage("已插入注释角标", 2000)
 
     def _insert_heading(self, level: int, fallback_text: str) -> None:
-        cursor = self.rich_editor.textCursor()
+        cursor = self.markdown_editor.textCursor()
         selected_text = cursor.selectedText().strip() if cursor.hasSelection() else ""
         heading_text = selected_text or fallback_text
         prefix = "#" * level
@@ -1575,7 +2108,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("已插入三级标题", 2000)
 
     def on_insert_quote(self) -> None:
-        cursor = self.rich_editor.textCursor()
+        cursor = self.markdown_editor.textCursor()
         selected_text = cursor.selectedText().strip() if cursor.hasSelection() else "引用内容"
         quote_lines = [line for line in selected_text.splitlines() if line.strip()]
         if not quote_lines:
@@ -1585,24 +2118,15 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("已插入引用格式", 2000)
 
     def on_insert_table(self) -> None:
-        rows, ok = QInputDialog.getInt(self, "插入表格", "行数:", value=3, min=1, max=50)
-        if not ok:
-            return
-        cols, ok = QInputDialog.getInt(self, "插入表格", "列数:", value=3, min=1, max=20)
-        if not ok:
-            return
-
-        # Emit pure GFM table syntax so Hugo/GitHub can render it consistently.
-        headers = [f"标题{i + 1}" for i in range(cols)]
-        header_line = "| " + " | ".join(headers) + " |"
-        separator_line = "| " + " | ".join(["---"] * cols) + " |"
-        body_lines = []
-        for row_idx in range(rows):
-            row_cells = [f"内容{row_idx + 1}-{col_idx + 1}" for col_idx in range(cols)]
-            body_lines.append("| " + " | ".join(row_cells) + " |")
-        table_md = "\n".join([header_line, separator_line, *body_lines]) + "\n"
-
-        self._insert_text_at_cursor(table_md)
+        cursor = self.markdown_editor.textCursor()
+        prefix = "" if cursor.atBlockStart() else "\n"
+        table_md = (
+            "| 标题1 | 标题2 |\n"
+            "| --- | --- |\n"
+            "| 单元格 | 单元格 |\n"
+        )
+        cursor.insertText(prefix + table_md)
+        self.markdown_editor.setTextCursor(cursor)
         self.statusBar().showMessage("已插入表格", 2000)
 
     def on_insert_task_item(self) -> None:
@@ -1610,12 +2134,13 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("已插入任务列表项", 2000)
 
     def on_insert_code_block(self, language: str) -> None:
-        # Insert fenced code block and place caret inside for immediate typing.
-        code_template = f"\n```{language}\n\n```\n"
-        cursor = self.rich_editor.textCursor()
+        cursor = self.markdown_editor.textCursor()
+        prefix = "" if cursor.atBlockStart() else "\n"
+        code_template = f"{prefix}```{language}\n\n```\n"
+        start_pos = cursor.position()
         cursor.insertText(code_template)
-        cursor.movePosition(QTextCursor.MoveOperation.Up)
-        self.rich_editor.setTextCursor(cursor)
+        cursor.setPosition(start_pos + len(prefix) + len(f"```{language}\n"))
+        self.markdown_editor.setTextCursor(cursor)
         self.statusBar().showMessage(f"已插入 {language} 代码块", 2000)
 
     def on_insert_formula_block(self) -> None:
@@ -1632,8 +2157,34 @@ class MainWindow(QMainWindow):
         self._insert_text_at_cursor(mermaid_template)
         self.statusBar().showMessage("已插入 Mermaid 图表块", 2000)
 
+    def on_toggle_preview(self, checked: bool) -> None:
+        if not hasattr(self, "main_splitter"):
+            return
+
+        sizes = self.main_splitter.sizes()
+        left_size = sizes[0] if len(sizes) >= 1 else 280
+        editor_size = sizes[1] if len(sizes) >= 2 else 560
+        preview_size = sizes[2] if len(sizes) >= 3 else 560
+
+        self._scroll_guard = True
+        try:
+            if checked:
+                self.md_preview.setVisible(True)
+                combined = max(420, editor_size + preview_size)
+                restored_editor = max(260, int(combined * 0.52))
+                restored_preview = max(220, combined - restored_editor)
+                self.main_splitter.setSizes([left_size, restored_editor, restored_preview])
+                self.statusBar().showMessage("已显示右侧预览", 1800)
+            else:
+                self.md_preview.setVisible(False)
+                expanded_editor = max(420, editor_size + preview_size)
+                self.main_splitter.setSizes([left_size, expanded_editor, 0])
+                self.statusBar().showMessage("已隐藏右侧预览", 1800)
+        finally:
+            self._scroll_guard = False
+
     def _next_available_footnote_index(self) -> int:
-        text = self.rich_editor.toPlainText()
+        text = self.markdown_editor.toPlainText()
         used_numbers = {int(num) for num in re.findall(r"\[\^(\d+)\]", text)}
         candidate = 1
         while candidate in used_numbers:
@@ -1701,10 +2252,12 @@ class MainWindow(QMainWindow):
         if not self.local_repo_path.strip():
             self.article_list.clear()
             self.article_records = []
+            self.existing_categories = []
             return
 
         selected_path = str(self.current_article_path) if self.current_article_path else ""
         self.article_records = self._collect_article_files()
+        self.scan_existing_categories()
 
         search_text = self.search_input.text().strip().lower()
         filtered = [
@@ -1747,7 +2300,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "读取失败", f"读取文章失败:\n{exc}")
             return
 
-        front_matter, body_markdown = self._split_front_matter(raw_markdown)
+        front_matter, _ = self._split_front_matter(raw_markdown)
         self.current_article_path = article_path
         self.current_front_matter = front_matter
 
@@ -1765,25 +2318,43 @@ class MainWindow(QMainWindow):
         self.fm_draft_checkbox.setChecked(self._extract_draft(front_matter))
         self._metadata_updating = False
 
-        self.rich_editor.blockSignals(True)
-        self.rich_editor.setMarkdown(body_markdown)
-        self.rich_editor.blockSignals(False)
-        self.on_rich_text_changed()
+        self.markdown_editor.blockSignals(True)
+        self.markdown_editor.setPlainText(raw_markdown)
+        self.markdown_editor.blockSignals(False)
+        self.on_markdown_text_changed()
         self.statusBar().showMessage(f"已加载: {article_path.name}", 2500)
 
     def on_new_article(self) -> None:
-        filename, ok = QInputDialog.getText(self, "新建文章", "请输入文章标题或文件名：")
-        if not ok or not filename.strip():
+        self.scan_existing_categories()
+        dialog = NewArticleDialog(self.existing_categories, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
-        # 允许用户输入中文标题，自动转为文件名
-        title = filename.strip()
-        # 文件名仅保留字母数字下划线和短横线，中文转拼音可选，这里直接用短横线替换
-        sanitized = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5\-_]+', "-", title).strip(".-")
+        values = dialog.values()
+        file_name_input = values["file_name"]
+        title_input = values["title"]
+        selected_category = values["selected_category"]
+        new_category = values["new_category"]
+
+        if not file_name_input:
+            QMessageBox.warning(self, "无效名称", "请输入文章文件名。")
+            return
+        if not title_input:
+            QMessageBox.warning(self, "无效标题", "请输入文章标题。")
+            return
+
+        category_value = (new_category or selected_category).strip()
+        category_value = self._normalize_category_name(category_value)
+        if not category_value:
+            QMessageBox.warning(self, "分类缺失", "请选择一个分类，或输入一个新分类。")
+            return
+
+        # 文件名仅保留字母数字下划线和短横线，中文可保留。
+        sanitized = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5\-_]+', "-", file_name_input).strip(".-")
         # 去除多余的连续短横线
         sanitized = re.sub(r'-+', '-', sanitized)
         if not sanitized:
-            QMessageBox.warning(self, "无效名称", "文章标题不能为空。")
+            QMessageBox.warning(self, "无效名称", "文章文件名不能为空。")
             return
 
         # 自动补全.md后缀
@@ -1792,7 +2363,7 @@ class MainWindow(QMainWindow):
         else:
             filename_md = sanitized
 
-        posts_dir = self._configured_posts_dir(show_warning=True, create_if_missing=True)
+        posts_dir = self._preferred_new_post_dir()
         if posts_dir is None:
             return
         article_path = posts_dir / filename_md
@@ -1800,14 +2371,14 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "已存在", "同名文章已存在，请更换标题或文件名。")
             return
 
-        # front matter 的 title 字段用原始输入
         initial_front_matter = build_front_matter(
-            title,
+            title_input,
             tags=[],
-            categories=[],
+            categories=[category_value],
             draft=False,
             date_iso=self._current_iso_datetime(),
         )
+        self._ensure_stack_category_metadata(category_value)
         article_path.write_text(initial_front_matter, encoding="utf-8")
 
         self.refresh_article_list()
@@ -1873,7 +2444,7 @@ class MainWindow(QMainWindow):
         self.current_article_path = None
         self.current_front_matter = ""
         self.article_title_label.setText("当前文章: 未选择")
-        self.rich_editor.clear()
+        self.markdown_editor.clear()
         self.md_preview.clear()
         self.refresh_article_list()
         self.statusBar().showMessage("删除完成", 2000)
@@ -1881,14 +2452,14 @@ class MainWindow(QMainWindow):
 
     def on_apply_front_matter(self) -> None:
         self.update_front_matter_from_fields()
-        self.on_rich_text_changed()
+        self.on_markdown_text_changed()
         self.statusBar().showMessage("Front Matter 已更新", 2000)
 
     def on_front_matter_field_changed(self) -> None:
         if self._metadata_updating:
             return
         self.update_front_matter_from_fields()
-        self.on_rich_text_changed()
+        self.on_markdown_text_changed()
 
     def update_front_matter_from_fields(self) -> None:
         title = self.fm_title_input.text().strip()
@@ -1897,10 +2468,14 @@ class MainWindow(QMainWindow):
 
         tags = [x.strip() for x in self.fm_tags_input.text().split(",") if x.strip()]
         categories = [
-            x.strip() for x in self.fm_categories_input.text().split(",") if x.strip()
+            self._normalize_category_name(x)
+            for x in self.fm_categories_input.text().split(",")
+            if self._normalize_category_name(x)
         ]
         draft = self.fm_draft_checkbox.isChecked()
-        date_iso = self._extract_date(self.current_front_matter) or self._current_iso_datetime()
+        full_text = self.markdown_editor.toPlainText()
+        old_front_matter, body_markdown = self._split_front_matter(full_text)
+        date_iso = self._extract_date(old_front_matter) or self._current_iso_datetime()
 
         self.current_front_matter = build_front_matter(
             title=title,
@@ -1909,6 +2484,18 @@ class MainWindow(QMainWindow):
             draft=draft,
             date_iso=date_iso,
         )
+
+        for category in categories:
+            self._ensure_stack_category_metadata(category)
+
+        new_markdown = self.current_front_matter + body_markdown.lstrip("\n")
+        cursor = self.markdown_editor.textCursor()
+        cursor.beginEditBlock()
+        cursor.select(QTextCursor.SelectionType.Document)
+        cursor.insertText(new_markdown)
+        cursor.endEditBlock()
+        self.markdown_editor.setTextCursor(cursor)
+
         self.article_title_label.setText(f"当前文章: {title or '未命名'}")
         self.article_title_label.setToolTip(title or '未命名')
 
@@ -1966,27 +2553,73 @@ class MainWindow(QMainWindow):
         match = re.search(r"(?m)^date:\s*(.+?)\s*$", front_matter)
         return match.group(1).strip().strip('"') if match else ""
 
-    def _editor_body_markdown(self) -> str:
-        body_markdown = self.rich_editor.document().toMarkdown().strip()
-        if not body_markdown:
-            body_markdown = html_to_markdown(self.rich_editor.toHtml()).strip()
-        return body_markdown + "\n" if body_markdown else ""
-
     def _compose_full_markdown(self) -> str:
-        body_markdown = self._editor_body_markdown()
-        front = self.current_front_matter.strip()
-        if front:
-            return front + "\n\n" + body_markdown
-        return body_markdown
+        markdown_text = self.markdown_editor.toPlainText().strip()
+        return markdown_text + "\n" if markdown_text else ""
 
-    def on_rich_text_changed(self) -> None:
+    def _render_markdown_html(self, markdown_text: str) -> str:
+        # Front Matter 是元数据，不参与正文渲染。
+        _, body_markdown = self._split_front_matter(markdown_text)
+        rendered_html = markdown_lib.markdown(
+            body_markdown,
+            extensions=["extra", "tables", "fenced_code", "footnotes", "sane_lists"],
+        )
+
+        editor_font = self.markdown_editor.font()
+        font_families = editor_font.families()
+        preview_font_family = font_families[0] if font_families else "sans-serif"
+        preview_font_family = preview_font_family.replace("'", "\\'")
+        preview_font_size = max(12, int(editor_font.pointSizeF() or 14))
+
+        return (
+            "<html><head><meta charset='utf-8'></head><body "
+            "style='font-family: "
+            + "'"
+            + preview_font_family
+            + "'"
+            + "; font-size: "
+            + str(preview_font_size)
+            + "px; line-height: 1.58; padding: 15px 18px; margin: 0;'>"
+            "<style>p { margin: 0 0 10px 0; }</style>"
+            + rendered_html
+            + "</body></html>"
+        )
+
+    def _sync_front_matter_fields(self, front_matter: str) -> None:
+        if self._metadata_updating:
+            return
+
+        title = self._extract_title(front_matter)
+        tags = self._extract_list_field(front_matter, "tags")
+        categories = self._extract_list_field(front_matter, "categories")
+        draft = self._extract_draft(front_matter)
+
+        self._metadata_updating = True
+        self.fm_title_input.setText(title)
+        self.fm_tags_input.setText(", ".join(tags))
+        self.fm_categories_input.setText(", ".join(categories))
+        self.fm_draft_checkbox.setChecked(draft)
+        self._metadata_updating = False
+
+    def on_markdown_text_changed(self) -> None:
         if self._sync_guard:
             return
 
         self._sync_guard = True
         try:
-            markdown_text = self._compose_full_markdown()
-            self.md_preview.setPlainText(markdown_text)
+            markdown_text = self.markdown_editor.toPlainText()
+            editor_ratio = self._editor_scroll_ratio()
+            self.current_front_matter, _ = self._split_front_matter(markdown_text)
+            self._sync_front_matter_fields(self.current_front_matter)
+
+            try:
+                self.md_preview.setHtml(self._render_markdown_html(markdown_text))
+            except Exception:
+                # Fallback to escaped source to avoid blank preview on syntax/extension issues.
+                self.md_preview.setHtml(f"<pre>{html.escape(markdown_text)}</pre>")
+
+            # setHtml 会重置预览滚动条，渲染完成后按编辑区比例恢复。
+            QTimer.singleShot(0, lambda ratio=editor_ratio: self._restore_preview_scroll(ratio))
         finally:
             self._sync_guard = False
 
@@ -2003,15 +2636,15 @@ class MainWindow(QMainWindow):
 
         self.statusBar().showMessage("正在导入...", 1500)
         try:
-            html_text, markdown_text = convert_docx_to_html_and_markdown(
+            _html_text, markdown_text = convert_docx_to_html_and_markdown(
                 docx_path,
                 "./static/images/",
             )
             self.last_docx_path = docx_path
             self.current_article_path = None
             self.current_front_matter = ""
-            self.rich_editor.setHtml(html_text)
-            self.md_preview.setPlainText(markdown_text)
+            self.markdown_editor.setPlainText(markdown_text)
+            self.on_markdown_text_changed()
             print(f"Docx 导入成功: {docx_path}")
             self.statusBar().showMessage("导入完成", 3000)
         except Exception as exc:
@@ -2037,6 +2670,10 @@ class MainWindow(QMainWindow):
                     draft=False,
                     date_iso=self._current_iso_datetime(),
                 )
+                cursor = QTextCursor(self.markdown_editor.document())
+                cursor.movePosition(QTextCursor.MoveOperation.Start)
+                cursor.insertText(self.current_front_matter)
+                self.markdown_editor.setTextCursor(cursor)
             full_markdown = self._compose_full_markdown().strip() + "\n"
             self.current_article_path.write_text(full_markdown, encoding="utf-8")
             print(f"文章已保存: {self.current_article_path}")
