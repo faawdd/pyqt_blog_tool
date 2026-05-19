@@ -455,8 +455,8 @@ class ElidedLabel(QLabel):
 __appname__ = "墨筑 (MoZu)"
 __version__ = "1.0.7"
 
-POSTS_RELATIVE_DIR = Path("content/post")
-POSTS_RELATIVE_DIR_CANDIDATES = [Path("content/post"), Path("content/posts")]
+POSTS_RELATIVE_DIR = Path("content/posts")
+POSTS_RELATIVE_DIR_CANDIDATES = [Path("content/posts"), Path("content/post")]
 DEFAULT_BRANCH = "main"
 LEGACY_SETTINGS_FILE = Path(__file__).resolve().parent / "app_settings.json"
 
@@ -771,6 +771,44 @@ class MainWindow(QMainWindow):
         target_dir = Path(repo_path) / "content" / "posts"
         target_dir.mkdir(parents=True, exist_ok=True)
         return target_dir
+
+    @staticmethod
+    def _is_path_inside(base_dir: Path, target_path: Path) -> bool:
+        try:
+            target_path.resolve().relative_to(base_dir.resolve())
+            return True
+        except ValueError:
+            return False
+
+    def _relocate_article_to_posts_dir(self, article_path: Path) -> Path:
+        """If an article is in legacy content/post, move it to content/posts."""
+        posts_dir = self._preferred_new_post_dir()
+        if posts_dir is None:
+            return article_path
+
+        repo_path = self.local_repo_path.strip()
+        if not repo_path:
+            return article_path
+
+        legacy_dir = Path(repo_path) / "content" / "post"
+        if not self._is_path_inside(legacy_dir, article_path):
+            return article_path
+
+        target_path = posts_dir / article_path.name
+        if target_path.exists() and target_path.resolve() != article_path.resolve():
+            stem = article_path.stem
+            suffix = article_path.suffix or ".md"
+            counter = 2
+            while True:
+                candidate = posts_dir / f"{stem}-{counter}{suffix}"
+                if not candidate.exists():
+                    target_path = candidate
+                    break
+                counter += 1
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        article_path.replace(target_path)
+        return target_path
 
     def _categories_root_dir(self) -> Path | None:
         repo_path = self.local_repo_path.strip()
@@ -2686,6 +2724,12 @@ class MainWindow(QMainWindow):
             return
 
         try:
+            relocated_path = self._relocate_article_to_posts_dir(self.current_article_path)
+            if relocated_path != self.current_article_path:
+                self.current_article_path = relocated_path
+                self.refresh_article_list()
+                self.select_article_item(relocated_path)
+
             self.update_front_matter_from_fields()
             if not self.current_front_matter.strip():
                 self.current_front_matter = build_front_matter(
