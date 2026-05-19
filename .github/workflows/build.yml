@@ -64,7 +64,7 @@ jobs:
         run: |
           pip install -r requirements.txt pyinstaller pillow
 
-        - name: Set app version from GitHub tag
+      - name: Set app version from GitHub tag
         run: |
           python - << 'PY'
           import os
