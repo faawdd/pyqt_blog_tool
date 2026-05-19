@@ -64,6 +64,29 @@ jobs:
         run: |
           pip install -r requirements.txt pyinstaller pillow
 
+        - name: Set app version from GitHub tag
+        run: |
+          python - << 'PY'
+          import os
+          from pathlib import Path
+
+          ref_name = (os.getenv("GITHUB_REF_NAME") or "").strip()
+          if ref_name.startswith("refs/tags/"):
+            ref_name = ref_name.split("/", 2)[-1]
+
+          if ref_name:
+            version = ref_name.lstrip("vV") or "0.0.0"
+          else:
+            sha = (os.getenv("GITHUB_SHA") or "")[:7]
+            version = f"0.0.0-dev+{sha}" if sha else "0.0.0-dev"
+
+          Path("version.py").write_text(
+            f'APP_VERSION = "{version}"\n',
+            encoding="utf-8",
+          )
+          print(f"Resolved app version: {version}")
+          PY
+
       - name: Generate app icon assets from SVG
         if: runner.os != 'Linux'
         run: |

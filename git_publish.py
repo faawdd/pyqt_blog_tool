@@ -32,10 +32,17 @@ def build_front_matter(
     return (
         "---\n"
         f'title: "{safe_title}"\n'
+        "description: \n"
         f"date: {now_iso}\n"
+        "image: \n"
+        "math: \n"
+        "license: \n"
+        "comments: true\n"
         f"tags: [{tags_yaml}]\n"
         f"categories: [{categories_yaml}]\n"
         f"draft: {'true' if draft else 'false'}\n"
+        "build:\n"
+        "    list: always    # Change to \"never\" to hide the page from the list\n"
         "---\n\n"
     )
 

@@ -57,6 +57,7 @@ from PyQt6.QtWidgets import (
 
 from docx_converter import convert_docx_to_html_and_markdown
 from git_publish import GitPushThread, RepoSyncThread, build_front_matter
+from version import APP_VERSION
 from git import Repo
 from PyQt6.QtWidgets import QScrollBar
 
@@ -453,7 +454,7 @@ class ElidedLabel(QLabel):
 
 # 应用信息
 __appname__ = "墨筑 (MoZu)"
-__version__ = "1.0.7"
+__version__ = APP_VERSION
 
 POSTS_RELATIVE_DIR = Path("content/posts")
 POSTS_RELATIVE_DIR_CANDIDATES = [Path("content/posts"), Path("content/post")]
